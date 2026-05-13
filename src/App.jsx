@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
 import {
   BookOpen, Users, ClipboardList, Plus, Trash2,
   ChevronDown, ChevronUp, CheckCircle, XCircle,
-  School, ArrowLeft, Loader
+  School, ArrowLeft, Loader, Camera, X, GraduationCap,
+  FileText, Image,
 } from 'lucide-react'
 
 const SUBJECTS = ['数学', '国語', '英語', '理科', '社会', '音楽', '美術', '体育', 'その他']
@@ -13,18 +14,24 @@ const SUBJECT_COLORS = {
   '美術': '#1a5a6b', '体育': '#5a6b1a', 'その他': '#5a5a5a',
 }
 
+function photoUrl(path) {
+  const { data } = supabase.storage.from('homework-photos').getPublicUrl(path)
+  return data.publicUrl
+}
+
 // ── UI部品 ──────────────────────────────────────
 
-function Btn({ onClick, children, color = 'accent', small, danger, outline }) {
-  const bg = danger ? 'var(--danger)' : outline ? 'transparent' : `var(--${color})`
-  const border = outline ? '1px solid var(--border)' : danger ? 'none' : 'none'
-  const col = outline ? 'var(--text-muted)' : '#fff'
+function Btn({ onClick, children, color = 'accent', small, danger, outline, disabled }) {
   return (
-    <button onClick={onClick} style={{
+    <button onClick={onClick} disabled={disabled} style={{
       display: 'inline-flex', alignItems: 'center', gap: 6,
       padding: small ? '6px 12px' : '9px 18px',
-      border, borderRadius: '10px', background: bg, color: col,
+      border: outline ? '1px solid var(--border)' : 'none',
+      borderRadius: '10px',
+      background: danger ? 'var(--danger)' : outline ? 'transparent' : `var(--${color})`,
+      color: outline ? 'var(--text-muted)' : '#fff',
       fontWeight: 700, fontSize: small ? '0.8rem' : '0.88rem',
+      opacity: disabled ? 0.6 : 1, cursor: disabled ? 'not-allowed' : 'pointer',
     }}>{children}</button>
   )
 }
@@ -64,13 +71,15 @@ function StatCard({ icon, label, value, sub }) {
 function Modal({ title, onClose, children }) {
   return (
     <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       zIndex: 1000, padding: 20,
     }} onClick={onClose}>
       <div style={{
         background: 'var(--surface)', borderRadius: '16px', padding: '28px',
-        width: '100%', maxWidth: 400, boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
+        width: '100%', maxWidth: 420,
+        maxHeight: '90vh', overflowY: 'auto',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
       }} onClick={e => e.stopPropagation()}>
         <div style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 20 }}>{title}</div>
         {children}
@@ -92,9 +101,111 @@ const inputStyle = {
   width: '100%', padding: '10px 14px',
   border: '1px solid var(--border)', borderRadius: '8px',
   fontSize: '0.95rem', outline: 'none', background: 'var(--bg)',
+  boxSizing: 'border-box',
 }
 
-// ── 校舎一覧画面 ────────────────────────────────
+function PhotoGrid({ photos, onDelete }) {
+  const [lightbox, setLightbox] = useState(null)
+  if (photos.length === 0) return null
+  return (
+    <>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: 8 }}>
+        {photos.map(p => (
+          <div key={p.id} style={{
+            position: 'relative', aspectRatio: '1',
+            borderRadius: 8, overflow: 'hidden',
+            background: 'var(--surface2)', cursor: 'pointer',
+          }}>
+            <img
+              src={photoUrl(p.file_path)} alt={p.file_name}
+              onClick={() => setLightbox(p)}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              onError={e => { e.target.style.opacity = '0.3' }}
+            />
+            {onDelete && (
+              <button onClick={e => { e.stopPropagation(); onDelete(p) }} style={{
+                position: 'absolute', top: 3, right: 3,
+                background: 'rgba(0,0,0,0.65)', border: 'none',
+                borderRadius: '50%', width: 20, height: 20, color: '#fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+              }}><X size={11} /></button>
+            )}
+          </div>
+        ))}
+      </div>
+      {lightbox && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 2000,
+        }} onClick={() => setLightbox(null)}>
+          <img
+            src={photoUrl(lightbox.file_path)} alt={lightbox.file_name}
+            style={{ maxWidth: '95vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 8 }}
+          />
+          <button onClick={() => setLightbox(null)} style={{
+            position: 'absolute', top: 20, right: 20,
+            background: 'rgba(255,255,255,0.15)', border: 'none',
+            borderRadius: '50%', width: 40, height: 40, color: '#fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          }}><X size={20} /></button>
+          <div style={{ position: 'absolute', bottom: 20, color: '#fff', fontSize: '0.82rem', opacity: 0.6 }}>
+            {lightbox.file_name}
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+// ── モード選択 ────────────────────────────────────
+
+function ModeSelect({ onSelect }) {
+  return (
+    <div style={{
+      minHeight: '100vh', background: 'var(--bg)',
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center', padding: 20,
+    }}>
+      <div style={{ textAlign: 'center', marginBottom: 48 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 10 }}>
+          <BookOpen size={36} color="var(--accent)" />
+          <span style={{ fontSize: '1.9rem', fontWeight: 700 }}>宿題提出管理</span>
+        </div>
+        <p style={{ color: 'var(--text-muted)', margin: 0, fontSize: '0.95rem' }}>どちらの画面を使いますか？</p>
+      </div>
+      <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', justifyContent: 'center' }}>
+        {[
+          { key: 'teacher', icon: <School size={44} />, label: '先生', desc: '校舎・生徒・宿題の管理', color: 'var(--accent)' },
+          { key: 'student', icon: <GraduationCap size={44} />, label: '生徒', desc: '宿題の確認・写真提出', color: '#7c3aed' },
+        ].map(({ key, icon, label, desc, color }) => (
+          <button key={key} onClick={() => onSelect(key)} style={{
+            background: 'var(--surface)', border: `2px solid ${color}22`,
+            borderRadius: '20px', padding: '40px 56px', textAlign: 'center',
+            cursor: 'pointer', minWidth: 210, transition: 'all 0.2s',
+          }}
+            onMouseEnter={e => {
+              e.currentTarget.style.borderColor = color
+              e.currentTarget.style.boxShadow = `0 10px 36px ${color}22`
+              e.currentTarget.style.transform = 'translateY(-4px)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.borderColor = `${color}22`
+              e.currentTarget.style.boxShadow = 'none'
+              e.currentTarget.style.transform = 'none'
+            }}
+          >
+            <div style={{ color, marginBottom: 16 }}>{icon}</div>
+            <div style={{ fontSize: '1.3rem', fontWeight: 700, marginBottom: 6 }}>{label}</div>
+            <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>{desc}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── 校舎一覧 ────────────────────────────────────
 
 function SchoolList({ onSelect }) {
   const [schools, setSchools] = useState([])
@@ -114,8 +225,7 @@ function SchoolList({ onSelect }) {
   async function addSchool() {
     if (!name.trim()) return
     await supabase.from('schools').insert({ name: name.trim() })
-    setName(''); setShowAdd(false)
-    fetchSchools()
+    setName(''); setShowAdd(false); fetchSchools()
   }
 
   async function deleteSchool(id) {
@@ -130,10 +240,9 @@ function SchoolList({ onSelect }) {
         <h2 style={{ fontSize: '1.1rem', fontWeight: 700 }}>校舎一覧</h2>
         <Btn onClick={() => setShowAdd(true)}><Plus size={16} />校舎を追加</Btn>
       </div>
-
       {loading ? (
         <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
-          <Loader size={24} style={{ animation: 'spin 1s linear infinite' }} />
+          <Loader size={24} />
         </div>
       ) : schools.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
@@ -144,8 +253,7 @@ function SchoolList({ onSelect }) {
           {schools.map(s => (
             <div key={s.id} style={{
               background: 'var(--surface)', border: '1px solid var(--border)',
-              borderRadius: '14px', padding: '20px',
-              cursor: 'pointer', transition: 'box-shadow 0.2s',
+              borderRadius: '14px', padding: '20px', cursor: 'pointer',
             }}
               onClick={() => onSelect(s)}
               onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.08)'}
@@ -161,7 +269,7 @@ function SchoolList({ onSelect }) {
                   <div style={{ fontWeight: 700, fontSize: '1rem' }}>{s.name}</div>
                 </div>
                 <button onClick={e => { e.stopPropagation(); deleteSchool(s.id) }} style={{
-                  background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4,
+                  background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4, cursor: 'pointer',
                 }}
                   onMouseEnter={e => e.currentTarget.style.color = 'var(--danger)'}
                   onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
@@ -174,7 +282,6 @@ function SchoolList({ onSelect }) {
           ))}
         </div>
       )}
-
       {showAdd && (
         <Modal title="校舎を追加" onClose={() => setShowAdd(false)}>
           <Field label="校舎名">
@@ -192,13 +299,14 @@ function SchoolList({ onSelect }) {
   )
 }
 
-// ── 校舎詳細画面 ────────────────────────────────
+// ── 校舎詳細 ────────────────────────────────────
 
 function SchoolDetail({ school, onBack }) {
   const [tab, setTab] = useState('homework')
   const [students, setStudents] = useState([])
   const [homework, setHomework] = useState([])
   const [submissions, setSubmissions] = useState([])
+  const [photoSubmissions, setPhotoSubmissions] = useState([])
   const [loading, setLoading] = useState(true)
   const [showAddHW, setShowAddHW] = useState(false)
   const [showAddSt, setShowAddSt] = useState(false)
@@ -212,9 +320,19 @@ function SchoolDetail({ school, onBack }) {
       supabase.from('homework').select('*').eq('school_id', school.id).order('deadline'),
       supabase.from('submissions').select('*'),
     ])
+    const hwList = hw || []
+    const hwIds = hwList.map(h => h.id)
+    let photos = []
+    if (hwIds.length > 0) {
+      const { data } = await supabase.from('photo_submissions')
+        .select('*, students(name)')
+        .in('homework_id', hwIds)
+      photos = data || []
+    }
     setStudents(st || [])
-    setHomework(hw || [])
+    setHomework(hwList)
     setSubmissions(sub || [])
+    setPhotoSubmissions(photos)
     setLoading(false)
   }
 
@@ -232,7 +350,8 @@ function SchoolDetail({ school, onBack }) {
   async function addHomework(form) {
     const { data: hw } = await supabase.from('homework').insert({
       title: form.title, subject: form.subject,
-      deadline: form.deadline, school_id: school.id
+      deadline: form.deadline, scope: form.scope,
+      school_id: school.id,
     }).select().single()
     if (hw) {
       const subs = students.map(s => ({ homework_id: hw.id, student_id: s.id, submitted: false }))
@@ -269,11 +388,10 @@ function SchoolDetail({ school, onBack }) {
 
   return (
     <div>
-      {/* 戻るボタン */}
       <button onClick={onBack} style={{
         display: 'flex', alignItems: 'center', gap: 6,
         background: 'none', border: 'none', color: 'var(--text-muted)',
-        fontWeight: 600, fontSize: '0.88rem', marginBottom: 20, padding: 0,
+        fontWeight: 600, fontSize: '0.88rem', marginBottom: 20, padding: 0, cursor: 'pointer',
       }}>
         <ArrowLeft size={16} /> 校舎一覧に戻る
       </button>
@@ -287,7 +405,6 @@ function SchoolDetail({ school, onBack }) {
         <h2 style={{ fontSize: '1.3rem', fontWeight: 700 }}>{school.name}</h2>
       </div>
 
-      {/* 統計 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 24 }}>
         <StatCard icon={<ClipboardList size={20} />} label="宿題数" value={homework.length} />
         <StatCard icon={<Users size={20} />} label="生徒数" value={students.length} />
@@ -295,7 +412,6 @@ function SchoolDetail({ school, onBack }) {
         <StatCard icon={<XCircle size={20} />} label="未提出ありの生徒" value={notSubmittedStudents.length} sub="いずれかの宿題で未提出" />
       </div>
 
-      {/* タブ */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 20 }}>
         {[
           { key: 'homework', label: '宿題一覧', icon: <ClipboardList size={15} /> },
@@ -306,7 +422,7 @@ function SchoolDetail({ school, onBack }) {
             background: tab === key ? 'var(--accent)' : 'transparent',
             color: tab === key ? '#fff' : 'var(--text-muted)',
             fontWeight: 600, fontSize: '0.85rem',
-            display: 'flex', alignItems: 'center', gap: 6,
+            display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
           }}>{icon}{label}</button>
         ))}
       </div>
@@ -316,8 +432,10 @@ function SchoolDetail({ school, onBack }) {
       ) : tab === 'homework' ? (
         <HomeworkTab
           homework={homework} students={students} submissions={submissions}
+          photoSubmissions={photoSubmissions}
           onAdd={addHomework} onDelete={deleteHomework} onToggle={toggleSubmission}
           showAdd={showAddHW} setShowAdd={setShowAddHW}
+          onRefresh={fetchAll}
         />
       ) : (
         <StudentsTab
@@ -330,9 +448,9 @@ function SchoolDetail({ school, onBack }) {
   )
 }
 
-// ── 宿題タブ ─────────────────────────────────────
+// ── 宿題タブ ────────────────────────────────────
 
-function HomeworkTab({ homework, students, submissions, onAdd, onDelete, onToggle, showAdd, setShowAdd }) {
+function HomeworkTab({ homework, students, submissions, photoSubmissions, onAdd, onDelete, onToggle, showAdd, setShowAdd, onRefresh }) {
   const [filter, setFilter] = useState('all')
   const subjects = [...new Set(homework.map(h => h.subject))]
   const filtered = filter === 'all' ? homework : homework.filter(h => h.subject === filter)
@@ -347,7 +465,7 @@ function HomeworkTab({ homework, students, submissions, onAdd, onDelete, onToggl
               border: '1px solid var(--border)',
               background: filter === s ? 'var(--accent)' : 'var(--surface)',
               color: filter === s ? '#fff' : 'var(--text-muted)',
-              fontSize: '0.8rem', fontWeight: 600,
+              fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
             }}>{s === 'all' ? 'すべて' : s}</button>
           ))}
         </div>
@@ -360,7 +478,8 @@ function HomeworkTab({ homework, students, submissions, onAdd, onDelete, onToggl
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {filtered.map(hw => (
             <HomeworkCard key={hw.id} hw={hw} students={students} submissions={submissions}
-              onToggle={onToggle} onDelete={onDelete} />
+              photoSubmissions={photoSubmissions}
+              onToggle={onToggle} onDelete={onDelete} onRefresh={onRefresh} />
           ))}
         </div>
       )}
@@ -370,10 +489,16 @@ function HomeworkTab({ homework, students, submissions, onAdd, onDelete, onToggl
   )
 }
 
-function HomeworkCard({ hw, students, submissions, onToggle, onDelete }) {
+// ── 宿題カード（先生用）────────────────────────────
+
+function HomeworkCard({ hw, students, submissions, photoSubmissions, onToggle, onDelete, onRefresh }) {
   const [open, setOpen] = useState(false)
+  const [photoOpen, setPhotoOpen] = useState(false)
+  const [editingScope, setEditingScope] = useState(false)
+  const [scope, setScope] = useState(hw.scope || '')
   const color = SUBJECT_COLORS[hw.subject] || '#5a5a5a'
   const isOverdue = new Date(hw.deadline) < new Date()
+  const myPhotos = photoSubmissions.filter(p => p.homework_id === hw.id)
 
   const submitted = students.filter(s => {
     const sub = submissions.find(sb => sb.homework_id === hw.id && sb.student_id === s.id)
@@ -385,9 +510,22 @@ function HomeworkCard({ hw, students, submissions, onToggle, onDelete }) {
   })
   const rate = students.length > 0 ? Math.round((submitted.length / students.length) * 100) : 0
 
+  async function saveScope() {
+    await supabase.from('homework').update({ scope }).eq('id', hw.id)
+    setEditingScope(false)
+  }
+
+  const photosByStudent = myPhotos.reduce((acc, p) => {
+    const name = p.students?.name || '不明'
+    if (!acc[name]) acc[name] = []
+    acc[name].push(p)
+    return acc
+  }, {})
+
   return (
     <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '14px', overflow: 'hidden' }}>
       <div style={{ padding: '18px 20px' }}>
+        {/* ヘッダー */}
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
           <div style={{ flex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
@@ -397,11 +535,48 @@ function HomeworkCard({ hw, students, submissions, onToggle, onDelete }) {
             <div style={{ fontSize: '1.05rem', fontWeight: 700 }}>{hw.title}</div>
             <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>締め切り：{hw.deadline}</div>
           </div>
-          <button onClick={() => onDelete(hw.id)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4 }}
+          <button onClick={() => onDelete(hw.id)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4, cursor: 'pointer' }}
             onMouseEnter={e => e.currentTarget.style.color = 'var(--danger)'}
             onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
           ><Trash2 size={16} /></button>
         </div>
+
+        {/* 課題範囲 */}
+        <div style={{ marginTop: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <FileText size={12} />課題範囲
+            </span>
+            <button
+              onClick={() => editingScope ? saveScope() : setEditingScope(true)}
+              style={{ fontSize: '0.72rem', color: 'var(--accent)', background: 'none', border: 'none', fontWeight: 700, cursor: 'pointer' }}
+            >
+              {editingScope ? '保存' : '編集'}
+            </button>
+          </div>
+          {editingScope ? (
+            <textarea
+              style={{ ...inputStyle, minHeight: 72, resize: 'vertical', fontSize: '0.88rem' }}
+              value={scope}
+              onChange={e => setScope(e.target.value)}
+              placeholder="例：教科書 p.50-60、問1〜5"
+              autoFocus
+              onKeyDown={e => e.key === 'Escape' && setEditingScope(false)}
+            />
+          ) : (
+            <div style={{
+              padding: '9px 12px', borderRadius: 8, minHeight: 38,
+              background: scope ? 'var(--accent-light)' : 'var(--surface2)',
+              borderLeft: scope ? '3px solid var(--accent)' : '3px solid var(--border)',
+              fontSize: '0.88rem', whiteSpace: 'pre-wrap',
+              color: scope ? 'inherit' : 'var(--text-muted)',
+            }}>
+              {scope || '未設定 — 「編集」から入力'}
+            </div>
+          )}
+        </div>
+
+        {/* 提出率 */}
         <div style={{ marginTop: 14 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
             <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
@@ -415,11 +590,12 @@ function HomeworkCard({ hw, students, submissions, onToggle, onDelete }) {
         </div>
       </div>
 
+      {/* 生徒の提出状況 */}
       <button onClick={() => setOpen(o => !o)} style={{
         width: '100%', padding: '10px 20px', background: 'var(--surface2)',
         border: 'none', borderTop: '1px solid var(--border)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        gap: 6, fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600,
+        gap: 6, fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600, cursor: 'pointer',
       }}>
         {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         {open ? '閉じる' : '生徒の提出状況を見る'}
@@ -435,7 +611,7 @@ function HomeworkCard({ hw, students, submissions, onToggle, onDelete }) {
                   <button key={s.id} onClick={() => onToggle(hw.id, s.id)} style={{
                     padding: '5px 12px', borderRadius: '999px',
                     border: '1px solid var(--danger)', background: 'var(--danger-light)',
-                    color: 'var(--danger)', fontSize: '0.8rem', fontWeight: 500,
+                    color: 'var(--danger)', fontSize: '0.8rem', fontWeight: 500, cursor: 'pointer',
                   }} title="クリックで提出済みにする">{s.name}</button>
                 ))}
               </div>
@@ -449,7 +625,7 @@ function HomeworkCard({ hw, students, submissions, onToggle, onDelete }) {
                   <button key={s.id} onClick={() => onToggle(hw.id, s.id)} style={{
                     padding: '5px 12px', borderRadius: '999px',
                     border: '1px solid var(--accent)', background: 'var(--accent-light)',
-                    color: 'var(--accent)', fontSize: '0.8rem', fontWeight: 500,
+                    color: 'var(--accent)', fontSize: '0.8rem', fontWeight: 500, cursor: 'pointer',
                   }} title="クリックで未提出に戻す">{s.name}</button>
                 ))}
               </div>
@@ -457,12 +633,45 @@ function HomeworkCard({ hw, students, submissions, onToggle, onDelete }) {
           )}
         </div>
       )}
+
+      {/* 提出写真 */}
+      <button onClick={() => setPhotoOpen(o => !o)} style={{
+        width: '100%', padding: '10px 20px', background: 'var(--surface2)',
+        border: 'none', borderTop: '1px solid var(--border)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        gap: 6, fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600, cursor: 'pointer',
+      }}>
+        {photoOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        <Camera size={13} />
+        提出写真を見る（{myPhotos.length}枚）
+      </button>
+
+      {photoOpen && (
+        <div style={{ padding: '16px 20px 20px' }}>
+          {myPhotos.length === 0 ? (
+            <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px 0', fontSize: '0.88rem' }}>
+              写真の提出はありません
+            </div>
+          ) : (
+            Object.entries(photosByStudent).map(([studentName, photos]) => (
+              <div key={studentName} style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: 8, color: 'var(--text-muted)' }}>
+                  {studentName}（{photos.length}枚）
+                </div>
+                <PhotoGrid photos={photos} />
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   )
 }
 
+// ── 宿題追加モーダル ────────────────────────────
+
 function AddHomeworkModal({ onAdd, onClose }) {
-  const [form, setForm] = useState({ title: '', subject: '数学', deadline: '' })
+  const [form, setForm] = useState({ title: '', subject: '数学', deadline: '', scope: '' })
   const handle = () => {
     if (!form.title || !form.deadline) return alert('タイトルと締め切りを入力してください')
     onAdd(form); onClose()
@@ -471,7 +680,7 @@ function AddHomeworkModal({ onAdd, onClose }) {
     <Modal title="宿題を追加" onClose={onClose}>
       <Field label="宿題名">
         <input style={inputStyle} placeholder="例：数学プリント②" value={form.title}
-          onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
+          onChange={e => setForm(f => ({ ...f, title: e.target.value }))} autoFocus />
       </Field>
       <Field label="締め切り">
         <input style={inputStyle} type="date" value={form.deadline}
@@ -483,6 +692,14 @@ function AddHomeworkModal({ onAdd, onClose }) {
           {SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
       </Field>
+      <Field label="課題範囲（任意）">
+        <textarea
+          style={{ ...inputStyle, minHeight: 72, resize: 'vertical', fontSize: '0.88rem' }}
+          placeholder="例：教科書 p.50-60、問1〜5"
+          value={form.scope}
+          onChange={e => setForm(f => ({ ...f, scope: e.target.value }))}
+        />
+      </Field>
       <div style={{ display: 'flex', gap: 10 }}>
         <Btn outline onClick={onClose}>キャンセル</Btn>
         <Btn onClick={handle}>追加する</Btn>
@@ -491,7 +708,7 @@ function AddHomeworkModal({ onAdd, onClose }) {
   )
 }
 
-// ── 生徒タブ ─────────────────────────────────────
+// ── 生徒タブ ────────────────────────────────────
 
 function StudentsTab({ students, homework, submissions, onAdd, onDelete, showAdd, setShowAdd }) {
   const [name, setName] = useState('')
@@ -538,7 +755,7 @@ function StudentsTab({ students, homework, submissions, onAdd, onDelete, showAdd
                     <div style={{ fontSize: '0.78rem', color: 'var(--accent)', marginTop: 2 }}>すべて提出済み ✓</div>
                   )}
                 </div>
-                <button onClick={() => onDelete(s.id)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4 }}
+                <button onClick={() => onDelete(s.id)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4, cursor: 'pointer' }}
                   onMouseEnter={e => e.currentTarget.style.color = 'var(--danger)'}
                   onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
                 ><Trash2 size={15} /></button>
@@ -565,10 +782,352 @@ function StudentsTab({ students, homework, submissions, onAdd, onDelete, showAdd
   )
 }
 
+// ── 生徒モード ────────────────────────────────────
+
+function StudentMode({ onBack }) {
+  const [school, setSchool] = useState(null)
+  const [student, setStudent] = useState(null)
+
+  if (!school) return <StudentSchoolSelect onSelect={setSchool} onBack={onBack} />
+  if (!student) return <StudentNameSelect school={school} onSelect={setStudent} onBack={() => setSchool(null)} />
+  return <StudentHomeworkList school={school} student={student} onBack={() => setStudent(null)} />
+}
+
+function StudentSchoolSelect({ onSelect, onBack }) {
+  const [schools, setSchools] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    supabase.from('schools').select('*').order('created_at').then(({ data }) => {
+      setSchools(data || [])
+      setLoading(false)
+    })
+  }, [])
+
+  return (
+    <div>
+      <button onClick={onBack} style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        background: 'none', border: 'none', color: 'var(--text-muted)',
+        fontWeight: 600, fontSize: '0.88rem', marginBottom: 24, padding: 0, cursor: 'pointer',
+      }}>
+        <ArrowLeft size={16} /> モード選択に戻る
+      </button>
+      <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 20 }}>あなたの校舎を選んでください</h2>
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}><Loader size={24} /></div>
+      ) : schools.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>校舎がありません</div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 }}>
+          {schools.map(s => (
+            <button key={s.id} onClick={() => onSelect(s)} style={{
+              background: 'var(--surface)', border: '1px solid var(--border)',
+              borderRadius: '14px', padding: '24px 20px', textAlign: 'left',
+              cursor: 'pointer', transition: 'all 0.2s',
+            }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.08)' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none' }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{
+                  width: 40, height: 40, borderRadius: '10px',
+                  background: 'var(--accent-light)', display: 'flex',
+                  alignItems: 'center', justifyContent: 'center', color: 'var(--accent)', flexShrink: 0,
+                }}><School size={20} /></div>
+                <div style={{ fontWeight: 700 }}>{s.name}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StudentNameSelect({ school, onSelect, onBack }) {
+  const [students, setStudents] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    supabase.from('students').select('*').eq('school_id', school.id).order('created_at').then(({ data }) => {
+      setStudents(data || [])
+      setLoading(false)
+    })
+  }, [school.id])
+
+  return (
+    <div>
+      <button onClick={onBack} style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        background: 'none', border: 'none', color: 'var(--text-muted)',
+        fontWeight: 600, fontSize: '0.88rem', marginBottom: 24, padding: 0, cursor: 'pointer',
+      }}>
+        <ArrowLeft size={16} /> 校舎選択に戻る
+      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+        <div style={{
+          width: 36, height: 36, borderRadius: '10px',
+          background: 'var(--accent-light)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', color: 'var(--accent)',
+        }}><School size={18} /></div>
+        <h2 style={{ fontSize: '1.1rem', fontWeight: 700 }}>{school.name} — 名前を選んでください</h2>
+      </div>
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}><Loader size={24} /></div>
+      ) : students.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>生徒が登録されていません</div>
+      ) : (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '14px', overflow: 'hidden' }}>
+          {students.map((s, i) => (
+            <button key={s.id} onClick={() => onSelect(s)} style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+              padding: '14px 20px', background: 'none', border: 'none',
+              borderBottom: i < students.length - 1 ? '1px solid var(--border)' : 'none',
+              cursor: 'pointer', textAlign: 'left', transition: 'background 0.15s',
+            }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'none'}
+            >
+              <div style={{
+                width: 36, height: 36, borderRadius: '50%',
+                background: '#7c3aed18', color: '#7c3aed',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontWeight: 700, fontSize: '0.85rem', flexShrink: 0,
+              }}>{s.name[0]}</div>
+              <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{s.name}</div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StudentHomeworkList({ school, student, onBack }) {
+  const [homework, setHomework] = useState([])
+  const [photos, setPhotos] = useState([])
+  const [notes, setNotes] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => { fetchData() }, [student.id, school.id])
+
+  async function fetchData() {
+    setLoading(true)
+    const [{ data: hw }, { data: ph }, { data: nt }] = await Promise.all([
+      supabase.from('homework').select('*').eq('school_id', school.id).order('deadline'),
+      supabase.from('photo_submissions').select('*').eq('student_id', student.id),
+      supabase.from('student_scope_notes').select('*').eq('student_id', student.id),
+    ])
+    setHomework(hw || [])
+    setPhotos(ph || [])
+    setNotes(nt || [])
+    setLoading(false)
+  }
+
+  function addPhoto(hwId, photo) {
+    setPhotos(prev => [...prev, photo])
+  }
+  function removePhoto(photoId) {
+    setPhotos(prev => prev.filter(p => p.id !== photoId))
+  }
+  function updateNote(hwId, note) {
+    setNotes(prev => {
+      const existing = prev.find(n => n.homework_id === hwId)
+      if (existing) return prev.map(n => n.homework_id === hwId ? { ...n, note } : n)
+      return [...prev, { homework_id: hwId, note }]
+    })
+  }
+
+  return (
+    <div>
+      <button onClick={onBack} style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        background: 'none', border: 'none', color: 'var(--text-muted)',
+        fontWeight: 600, fontSize: '0.88rem', marginBottom: 24, padding: 0, cursor: 'pointer',
+      }}>
+        <ArrowLeft size={16} /> 名前選択に戻る
+      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
+        <div style={{
+          width: 44, height: 44, borderRadius: '12px',
+          background: '#7c3aed18', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', color: '#7c3aed',
+        }}><GraduationCap size={22} /></div>
+        <div>
+          <div style={{ fontSize: '1.2rem', fontWeight: 700 }}>{student.name}</div>
+          <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>{school.name}</div>
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}><Loader size={24} /></div>
+      ) : homework.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
+          宿題が登録されていません
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {homework.map(hw => (
+            <StudentHomeworkCard
+              key={hw.id}
+              hw={hw}
+              student={student}
+              photos={photos.filter(p => p.homework_id === hw.id)}
+              scopeNote={notes.find(n => n.homework_id === hw.id)}
+              onAddPhoto={(photo) => addPhoto(hw.id, photo)}
+              onRemovePhoto={removePhoto}
+              onNoteChange={(note) => updateNote(hw.id, note)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StudentHomeworkCard({ hw, student, photos, scopeNote, onAddPhoto, onRemovePhoto, onNoteChange }) {
+  const [note, setNote] = useState(scopeNote?.note || '')
+  const [uploading, setUploading] = useState(false)
+  const [savingNote, setSavingNote] = useState(false)
+  const fileInputRef = useRef(null)
+  const color = SUBJECT_COLORS[hw.subject] || '#5a5a5a'
+  const isOverdue = new Date(hw.deadline) < new Date()
+
+  useEffect(() => {
+    setNote(scopeNote?.note || '')
+  }, [scopeNote])
+
+  async function saveNote(value) {
+    setSavingNote(true)
+    await supabase.from('student_scope_notes').upsert({
+      homework_id: hw.id,
+      student_id: student.id,
+      note: value,
+    }, { onConflict: 'homework_id,student_id' })
+    onNoteChange(value)
+    setSavingNote(false)
+  }
+
+  async function handleFiles(files) {
+    if (!files.length) return
+    setUploading(true)
+    for (const file of Array.from(files)) {
+      const ext = file.name.split('.').pop()
+      const path = `${hw.id}/${student.id}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
+      const { error: uploadErr } = await supabase.storage
+        .from('homework-photos')
+        .upload(path, file, { contentType: file.type, upsert: false })
+      if (!uploadErr) {
+        const { data } = await supabase.from('photo_submissions').insert({
+          homework_id: hw.id,
+          student_id: student.id,
+          file_path: path,
+          file_name: file.name,
+        }).select().single()
+        if (data) onAddPhoto(data)
+      }
+    }
+    setUploading(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  async function deletePhoto(photo) {
+    await supabase.storage.from('homework-photos').remove([photo.file_path])
+    await supabase.from('photo_submissions').delete().eq('id', photo.id)
+    onRemovePhoto(photo.id)
+  }
+
+  return (
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '14px', overflow: 'hidden' }}>
+      <div style={{ padding: '18px 20px' }}>
+        {/* ヘッダー */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+          <Badge color={color}>{hw.subject}</Badge>
+          {isOverdue && <Badge color="#c0392b">期限超過</Badge>}
+        </div>
+        <div style={{ fontSize: '1.05rem', fontWeight: 700 }}>{hw.title}</div>
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>締め切り：{hw.deadline}</div>
+
+        {/* 課題範囲（先生設定） */}
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--accent)', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <FileText size={12} />先生からの課題範囲
+          </div>
+          <div style={{
+            padding: '10px 14px', borderRadius: 8,
+            background: hw.scope ? 'var(--accent-light)' : 'var(--surface2)',
+            borderLeft: hw.scope ? '3px solid var(--accent)' : '3px solid var(--border)',
+            fontSize: '0.88rem', whiteSpace: 'pre-wrap',
+            color: hw.scope ? 'inherit' : 'var(--text-muted)',
+          }}>
+            {hw.scope || '先生からの課題範囲はまだ設定されていません'}
+          </div>
+        </div>
+
+        {/* 自分のメモ */}
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Image size={12} />自分のメモ
+            </span>
+            {savingNote && <span style={{ fontSize: '0.68rem', color: 'var(--accent)' }}>保存中…</span>}
+          </div>
+          <textarea
+            style={{ ...inputStyle, minHeight: 72, resize: 'vertical', fontSize: '0.88rem' }}
+            placeholder="自分用のメモを書いておこう（自動保存）"
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            onBlur={e => saveNote(e.target.value)}
+          />
+        </div>
+
+        {/* 写真提出 */}
+        <div style={{ marginTop: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Camera size={12} />提出写真（{photos.length}枚）
+            </div>
+            <Btn small onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+              {uploading ? <Loader size={13} /> : <Camera size={13} />}
+              {uploading ? 'アップロード中...' : '写真を追加'}
+            </Btn>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            style={{ display: 'none' }}
+            onChange={e => handleFiles(e.target.files)}
+          />
+          {photos.length > 0 ? (
+            <PhotoGrid photos={photos} onDelete={deletePhoto} />
+          ) : (
+            <div style={{
+              border: '2px dashed var(--border)', borderRadius: 8,
+              padding: '20px', textAlign: 'center',
+              color: 'var(--text-muted)', fontSize: '0.82rem',
+              cursor: 'pointer',
+            }} onClick={() => fileInputRef.current?.click()}>
+              <Camera size={20} style={{ marginBottom: 6, opacity: 0.4 }} />
+              <div>タップして写真を追加</div>
+              <div style={{ fontSize: '0.72rem', marginTop: 4, opacity: 0.7 }}>複数枚まとめて選択できます</div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── メインアプリ ────────────────────────────────
 
 export default function App() {
+  const [mode, setMode] = useState(null)
   const [selectedSchool, setSelectedSchool] = useState(null)
+
+  if (mode === null) return <ModeSelect onSelect={setMode} />
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
@@ -579,20 +1138,35 @@ export default function App() {
         <div style={{ maxWidth: 960, margin: '0 auto', display: 'flex', alignItems: 'center', height: 56, gap: 10 }}>
           <BookOpen size={20} color="var(--accent)" />
           <span style={{ fontWeight: 700, fontSize: '1rem' }}>宿題提出管理</span>
-          {selectedSchool && (
+          <Badge color={mode === 'teacher' ? '#2d5a27' : '#7c3aed'}>
+            {mode === 'teacher' ? '先生' : '生徒'}
+          </Badge>
+          {mode === 'teacher' && selectedSchool && (
             <>
               <span style={{ color: 'var(--text-muted)' }}>/</span>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>{selectedSchool.name}</span>
             </>
           )}
+          <div style={{ flex: 1 }} />
+          <button onClick={() => { setMode(null); setSelectedSchool(null) }} style={{
+            background: 'none', border: '1px solid var(--border)', borderRadius: 8,
+            padding: '5px 12px', fontSize: '0.78rem', color: 'var(--text-muted)',
+            fontWeight: 600, cursor: 'pointer',
+          }}>
+            モード切替
+          </button>
         </div>
       </header>
 
       <main style={{ maxWidth: 960, margin: '0 auto', padding: '28px 20px' }}>
-        {selectedSchool ? (
-          <SchoolDetail school={selectedSchool} onBack={() => setSelectedSchool(null)} />
+        {mode === 'teacher' ? (
+          selectedSchool ? (
+            <SchoolDetail school={selectedSchool} onBack={() => setSelectedSchool(null)} />
+          ) : (
+            <SchoolList onSelect={setSelectedSchool} />
+          )
         ) : (
-          <SchoolList onSelect={setSelectedSchool} />
+          <StudentMode onBack={() => setMode(null)} />
         )}
       </main>
     </div>
