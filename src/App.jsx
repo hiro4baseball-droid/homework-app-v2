@@ -4,7 +4,7 @@ import {
   BookOpen, Users, ClipboardList, Plus, Trash2,
   ChevronDown, ChevronUp, CheckCircle, XCircle,
   School, ArrowLeft, Loader, Camera, X, GraduationCap,
-  FileText, Image,
+  FileText, Image, Key,
 } from 'lucide-react'
 
 const SUBJECTS = ['数学', '国語', '英語', '理科', '社会', '音楽', '美術', '体育', 'その他']
@@ -347,6 +347,11 @@ function SchoolDetail({ school, onBack }) {
     fetchAll()
   }
 
+  async function updateStudentPin(id, pin) {
+    await supabase.from('students').update({ pin: pin || null }).eq('id', id)
+    fetchAll()
+  }
+
   async function addHomework(form) {
     const { data: hw } = await supabase.from('homework').insert({
       title: form.title, subject: form.subject,
@@ -440,7 +445,7 @@ function SchoolDetail({ school, onBack }) {
       ) : (
         <StudentsTab
           students={students} homework={homework} submissions={submissions}
-          onAdd={addStudent} onDelete={deleteStudent}
+          onAdd={addStudent} onDelete={deleteStudent} onUpdatePin={updateStudentPin}
           showAdd={showAddSt} setShowAdd={setShowAddSt}
         />
       )}
@@ -710,12 +715,25 @@ function AddHomeworkModal({ onAdd, onClose }) {
 
 // ── 生徒タブ ────────────────────────────────────
 
-function StudentsTab({ students, homework, submissions, onAdd, onDelete, showAdd, setShowAdd }) {
+function StudentsTab({ students, homework, submissions, onAdd, onDelete, onUpdatePin, showAdd, setShowAdd }) {
   const [name, setName] = useState('')
+  const [editingPin, setEditingPin] = useState(null)
+  const [pinInput, setPinInput] = useState('')
 
   const handle = () => {
     if (!name.trim()) return
     onAdd(name.trim()); setName(''); setShowAdd(false)
+  }
+
+  function startEditPin(s) {
+    setEditingPin(s.id)
+    setPinInput(s.pin || '')
+  }
+
+  async function savePin(studentId) {
+    await onUpdatePin(studentId, pinInput)
+    setEditingPin(null)
+    setPinInput('')
   }
 
   return (
@@ -738,6 +756,7 @@ function StudentsTab({ students, homework, submissions, onAdd, onDelete, showAdd
               <div key={s.id} style={{
                 display: 'flex', alignItems: 'center', padding: '14px 20px',
                 borderBottom: i < students.length - 1 ? '1px solid var(--border)' : 'none', gap: 12,
+                flexWrap: 'wrap',
               }}>
                 <div style={{
                   width: 36, height: 36, borderRadius: '50%',
@@ -745,7 +764,8 @@ function StudentsTab({ students, homework, submissions, onAdd, onDelete, showAdd
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontWeight: 700, fontSize: '0.85rem', flexShrink: 0,
                 }}>{s.name[0]}</div>
-                <div style={{ flex: 1 }}>
+
+                <div style={{ flex: 1, minWidth: 120 }}>
                   <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{s.name}</div>
                   {notSubmitted.length > 0 ? (
                     <div style={{ fontSize: '0.78rem', color: 'var(--danger)', marginTop: 2 }}>
@@ -755,6 +775,61 @@ function StudentsTab({ students, homework, submissions, onAdd, onDelete, showAdd
                     <div style={{ fontSize: '0.78rem', color: 'var(--accent)', marginTop: 2 }}>すべて提出済み ✓</div>
                   )}
                 </div>
+
+                {/* PIN管理 */}
+                {editingPin === s.id ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      value={pinInput}
+                      onChange={e => setPinInput(e.target.value.replace(/\D/g, ''))}
+                      placeholder="数字6桁"
+                      style={{
+                        width: 90, padding: '5px 8px', textAlign: 'center',
+                        border: '1px solid var(--accent)', borderRadius: 6,
+                        fontSize: '0.88rem', fontFamily: 'var(--mono)', outline: 'none',
+                        background: 'var(--bg)',
+                      }}
+                      autoFocus
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') savePin(s.id)
+                        if (e.key === 'Escape') setEditingPin(null)
+                      }}
+                    />
+                    <button onClick={() => savePin(s.id)} style={{
+                      fontSize: '0.75rem', color: '#fff', background: 'var(--accent)',
+                      border: 'none', borderRadius: 6, padding: '5px 10px', fontWeight: 700, cursor: 'pointer',
+                    }}>保存</button>
+                    <button onClick={() => setEditingPin(null)} style={{
+                      fontSize: '0.75rem', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer',
+                    }}>×</button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 4,
+                      padding: '4px 10px', borderRadius: '999px',
+                      background: s.pin ? 'var(--accent-light)' : 'var(--surface2)',
+                      border: `1px solid ${s.pin ? 'var(--accent)' : 'var(--border)'}`,
+                    }}>
+                      <Key size={11} color={s.pin ? 'var(--accent)' : 'var(--text-muted)'} />
+                      <span style={{
+                        fontSize: '0.8rem', fontFamily: 'var(--mono)', fontWeight: 700,
+                        color: s.pin ? 'var(--accent)' : 'var(--text-muted)',
+                      }}>
+                        {s.pin || '未設定'}
+                      </span>
+                    </div>
+                    <button onClick={() => startEditPin(s)} style={{
+                      fontSize: '0.72rem', color: 'var(--text-muted)', background: 'none',
+                      border: 'none', cursor: 'pointer', textDecoration: 'underline',
+                    }}>
+                      {s.pin ? '変更' : 'PINを設定'}
+                    </button>
+                  </div>
+                )}
+
                 <button onClick={() => onDelete(s.id)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4, cursor: 'pointer' }}
                   onMouseEnter={e => e.currentTarget.style.color = 'var(--danger)'}
                   onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
@@ -782,15 +857,109 @@ function StudentsTab({ students, homework, submissions, onAdd, onDelete, showAdd
   )
 }
 
+// ── PIN認証 ──────────────────────────────────────
+
+function StudentPINEntry({ student, onSuccess, onBack }) {
+  const [pin, setPin] = useState('')
+  const [error, setError] = useState(false)
+
+  // PIN未設定ならそのまま通過
+  if (!student.pin) {
+    onSuccess()
+    return null
+  }
+
+  function verify() {
+    if (pin === student.pin) {
+      setError(false)
+      onSuccess()
+    } else {
+      setError(true)
+      setPin('')
+    }
+  }
+
+  return (
+    <div style={{ maxWidth: 360, margin: '0 auto', padding: '40px 20px' }}>
+      <button onClick={onBack} style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        background: 'none', border: 'none', color: 'var(--text-muted)',
+        fontWeight: 600, fontSize: '0.88rem', marginBottom: 40, padding: 0, cursor: 'pointer',
+      }}>
+        <ArrowLeft size={16} /> 名前選択に戻る
+      </button>
+
+      <div style={{ textAlign: 'center' }}>
+        <div style={{
+          width: 72, height: 72, borderRadius: '50%', margin: '0 auto 16px',
+          background: '#7c3aed18', color: '#7c3aed',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: '1.8rem', fontWeight: 700,
+        }}>{student.name[0]}</div>
+        <div style={{ fontSize: '1.3rem', fontWeight: 700, marginBottom: 6 }}>{student.name}</div>
+        <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: 28 }}>
+          PINを入力してログイン
+        </div>
+
+        <input
+          type="password"
+          inputMode="numeric"
+          maxLength={6}
+          value={pin}
+          onChange={e => { setPin(e.target.value); setError(false) }}
+          onKeyDown={e => e.key === 'Enter' && pin && verify()}
+          placeholder="••••••"
+          autoFocus
+          style={{
+            ...inputStyle,
+            textAlign: 'center',
+            fontSize: '1.8rem',
+            letterSpacing: '0.25em',
+            padding: '14px',
+            marginBottom: 8,
+            borderColor: error ? 'var(--danger)' : 'var(--border)',
+          }}
+        />
+
+        {error && (
+          <div style={{ color: 'var(--danger)', fontSize: '0.85rem', marginBottom: 16, fontWeight: 600 }}>
+            PINが違います。もう一度試してください。
+          </div>
+        )}
+
+        <div style={{ marginTop: error ? 0 : 16 }}>
+          <Btn onClick={verify} disabled={!pin} color="accent">
+            <Key size={15} />ログイン
+          </Btn>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── 生徒モード ────────────────────────────────────
 
 function StudentMode({ onBack }) {
   const [school, setSchool] = useState(null)
   const [student, setStudent] = useState(null)
+  const [pinVerified, setPinVerified] = useState(false)
 
   if (!school) return <StudentSchoolSelect onSelect={setSchool} onBack={onBack} />
   if (!student) return <StudentNameSelect school={school} onSelect={setStudent} onBack={() => setSchool(null)} />
-  return <StudentHomeworkList school={school} student={student} onBack={() => setStudent(null)} />
+  if (!pinVerified) return (
+    <StudentPINEntry
+      student={student}
+      onSuccess={() => setPinVerified(true)}
+      onBack={() => setStudent(null)}
+    />
+  )
+  return (
+    <StudentHomeworkList
+      school={school}
+      student={student}
+      onBack={() => { setStudent(null); setPinVerified(false) }}
+    />
+  )
 }
 
 function StudentSchoolSelect({ onSelect, onBack }) {
