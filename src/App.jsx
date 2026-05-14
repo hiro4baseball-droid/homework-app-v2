@@ -1428,13 +1428,34 @@ function StudentHomeworkCard({ hw, student, photos, scopeNote, submission, onAdd
   async function doSubmit() {
     setSubmitting(true)
     const now = new Date().toISOString()
-    const { data } = await supabase.from('submissions').upsert({
-      homework_id: hw.id,
-      student_id: student.id,
-      submitted: true,
-      submitted_at: now,
-    }, { onConflict: 'homework_id,student_id' }).select().single()
-    if (data) onSubmit(data)
+
+    // 既存レコードを探してupdate、なければinsert
+    const { data: existing } = await supabase
+      .from('submissions')
+      .select('id')
+      .eq('homework_id', hw.id)
+      .eq('student_id', student.id)
+      .maybeSingle()
+
+    let result
+    if (existing) {
+      const { data } = await supabase
+        .from('submissions')
+        .update({ submitted: true, submitted_at: now })
+        .eq('id', existing.id)
+        .select()
+        .single()
+      result = data
+    } else {
+      const { data } = await supabase
+        .from('submissions')
+        .insert({ homework_id: hw.id, student_id: student.id, submitted: true, submitted_at: now })
+        .select()
+        .single()
+      result = data
+    }
+
+    if (result) onSubmit(result)
     setSubmitting(false)
   }
 
