@@ -19,6 +19,14 @@ function photoUrl(path) {
   return data.publicUrl
 }
 
+function fmtDate(iso) {
+  if (!iso) return ''
+  return new Date(iso).toLocaleString('ja-JP', {
+    year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  })
+}
+
 // ── UI部品 ──────────────────────────────────────
 
 function Btn({ onClick, children, color = 'accent', small, danger, outline, disabled }) {
@@ -373,10 +381,12 @@ function SchoolDetail({ school, onBack }) {
 
   async function toggleSubmission(hwId, studentId) {
     const existing = submissions.find(s => s.homework_id === hwId && s.student_id === studentId)
+    const newVal = existing ? !existing.submitted : true
+    const now = newVal ? new Date().toISOString() : null
     if (existing) {
-      await supabase.from('submissions').update({ submitted: !existing.submitted }).eq('id', existing.id)
+      await supabase.from('submissions').update({ submitted: newVal, submitted_at: now }).eq('id', existing.id)
     } else {
-      await supabase.from('submissions').insert({ homework_id: hwId, student_id: studentId, submitted: true })
+      await supabase.from('submissions').insert({ homework_id: hwId, student_id: studentId, submitted: true, submitted_at: now })
     }
     fetchAll()
   }
@@ -625,14 +635,24 @@ function HomeworkCard({ hw, students, submissions, photoSubmissions, onToggle, o
           {submitted.length > 0 && (
             <div>
               <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent)', marginBottom: 8 }}>✓ 提出済み ({submitted.length}人)</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {submitted.map(s => (
-                  <button key={s.id} onClick={() => onToggle(hw.id, s.id)} style={{
-                    padding: '5px 12px', borderRadius: '999px',
-                    border: '1px solid var(--accent)', background: 'var(--accent-light)',
-                    color: 'var(--accent)', fontSize: '0.8rem', fontWeight: 500, cursor: 'pointer',
-                  }} title="クリックで未提出に戻す">{s.name}</button>
-                ))}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {submitted.map(s => {
+                  const sub = submissions.find(sb => sb.homework_id === hw.id && sb.student_id === s.id)
+                  return (
+                    <div key={s.id} style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                      <button onClick={() => onToggle(hw.id, s.id)} style={{
+                        padding: '5px 12px', borderRadius: '999px',
+                        border: '1px solid var(--accent)', background: 'var(--accent-light)',
+                        color: 'var(--accent)', fontSize: '0.8rem', fontWeight: 500, cursor: 'pointer',
+                      }} title="クリックで未提出に戻す">{s.name}</button>
+                      {sub?.submitted_at && (
+                        <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                          {fmtDate(sub.submitted_at)}
+                        </span>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -1262,20 +1282,23 @@ function StudentHomeworkList({ school, student, onBack }) {
   const [homework, setHomework] = useState([])
   const [photos, setPhotos] = useState([])
   const [notes, setNotes] = useState([])
+  const [submissions, setSubmissions] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => { fetchData() }, [student.id, school.id])
 
   async function fetchData() {
     setLoading(true)
-    const [{ data: hw }, { data: ph }, { data: nt }] = await Promise.all([
+    const [{ data: hw }, { data: ph }, { data: nt }, { data: subs }] = await Promise.all([
       supabase.from('homework').select('*').eq('school_id', school.id).order('deadline'),
       supabase.from('photo_submissions').select('*').eq('student_id', student.id),
       supabase.from('student_scope_notes').select('*').eq('student_id', student.id),
+      supabase.from('submissions').select('*').eq('student_id', student.id),
     ])
     setHomework(hw || [])
     setPhotos(ph || [])
     setNotes(nt || [])
+    setSubmissions(subs || [])
     setLoading(false)
   }
 
@@ -1290,6 +1313,13 @@ function StudentHomeworkList({ school, student, onBack }) {
       const existing = prev.find(n => n.homework_id === hwId)
       if (existing) return prev.map(n => n.homework_id === hwId ? { ...n, note } : n)
       return [...prev, { homework_id: hwId, note }]
+    })
+  }
+  function updateSubmission(sub) {
+    setSubmissions(prev => {
+      const exists = prev.find(s => s.homework_id === sub.homework_id)
+      if (exists) return prev.map(s => s.homework_id === sub.homework_id ? sub : s)
+      return [...prev, sub]
     })
   }
 
@@ -1329,9 +1359,11 @@ function StudentHomeworkList({ school, student, onBack }) {
               student={student}
               photos={photos.filter(p => p.homework_id === hw.id)}
               scopeNote={notes.find(n => n.homework_id === hw.id)}
+              submission={submissions.find(s => s.homework_id === hw.id)}
               onAddPhoto={(photo) => addPhoto(hw.id, photo)}
               onRemovePhoto={removePhoto}
               onNoteChange={(note) => updateNote(hw.id, note)}
+              onSubmit={updateSubmission}
             />
           ))}
         </div>
@@ -1340,10 +1372,11 @@ function StudentHomeworkList({ school, student, onBack }) {
   )
 }
 
-function StudentHomeworkCard({ hw, student, photos, scopeNote, onAddPhoto, onRemovePhoto, onNoteChange }) {
+function StudentHomeworkCard({ hw, student, photos, scopeNote, submission, onAddPhoto, onRemovePhoto, onNoteChange, onSubmit }) {
   const [note, setNote] = useState(scopeNote?.note || '')
   const [uploading, setUploading] = useState(false)
   const [savingNote, setSavingNote] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const fileInputRef = useRef(null)
   const color = SUBJECT_COLORS[hw.subject] || '#5a5a5a'
   const isOverdue = new Date(hw.deadline) < new Date()
@@ -1390,6 +1423,19 @@ function StudentHomeworkCard({ hw, student, photos, scopeNote, onAddPhoto, onRem
     await supabase.storage.from('homework-photos').remove([photo.file_path])
     await supabase.from('photo_submissions').delete().eq('id', photo.id)
     onRemovePhoto(photo.id)
+  }
+
+  async function doSubmit() {
+    setSubmitting(true)
+    const now = new Date().toISOString()
+    const { data } = await supabase.from('submissions').upsert({
+      homework_id: hw.id,
+      student_id: student.id,
+      submitted: true,
+      submitted_at: now,
+    }, { onConflict: 'homework_id,student_id' }).select().single()
+    if (data) onSubmit(data)
+    setSubmitting(false)
   }
 
   return (
@@ -1456,7 +1502,7 @@ function StudentHomeworkCard({ hw, student, photos, scopeNote, onAddPhoto, onRem
             onChange={e => handleFiles(e.target.files)}
           />
           {photos.length > 0 ? (
-            <PhotoGrid photos={photos} onDelete={deletePhoto} />
+            <PhotoGrid photos={photos} onDelete={submission?.submitted ? undefined : deletePhoto} />
           ) : (
             <div style={{
               border: '2px dashed var(--border)', borderRadius: 8,
@@ -1467,6 +1513,39 @@ function StudentHomeworkCard({ hw, student, photos, scopeNote, onAddPhoto, onRem
               <Camera size={20} style={{ marginBottom: 6, opacity: 0.4 }} />
               <div>タップして写真を追加</div>
               <div style={{ fontSize: '0.72rem', marginTop: 4, opacity: 0.7 }}>複数枚まとめて選択できます</div>
+            </div>
+          )}
+        </div>
+
+        {/* 提出ボタン */}
+        <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+          {submission?.submitted ? (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              padding: '14px 16px', borderRadius: 10,
+              background: 'var(--accent-light)', border: '1px solid var(--accent)',
+            }}>
+              <CheckCircle size={22} color="var(--accent)" />
+              <div>
+                <div style={{ fontWeight: 700, color: 'var(--accent)' }}>提出済み</div>
+                {submission.submitted_at && (
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                    {fmtDate(submission.submitted_at)}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div>
+              {photos.length === 0 && (
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 10 }}>
+                  写真を添付してから提出ボタンを押してください
+                </div>
+              )}
+              <Btn onClick={doSubmit} disabled={submitting}>
+                {submitting ? <Loader size={15} /> : <CheckCircle size={15} />}
+                {submitting ? '提出中...' : '提出する'}
+              </Btn>
             </div>
           )}
         </div>
