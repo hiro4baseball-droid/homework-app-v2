@@ -857,6 +857,148 @@ function StudentsTab({ students, homework, submissions, onAdd, onDelete, onUpdat
   )
 }
 
+// ── 生徒自己登録 ──────────────────────────────────
+
+function StudentRegister({ school, onSuccess, onBack }) {
+  const [name, setName] = useState('')
+  const [pin, setPin] = useState('')
+  const [confirmPin, setConfirmPin] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  async function register() {
+    if (!name.trim()) return setError('名前を入力してください')
+    if (!pin) return setError('PINを入力してください')
+    if (pin.length < 4) return setError('PINは4桁以上にしてください')
+    if (pin !== confirmPin) return setError('PINが一致しません')
+
+    setLoading(true)
+    setError('')
+
+    // 同名チェック
+    const { data: existing } = await supabase
+      .from('students')
+      .select('id')
+      .eq('school_id', school.id)
+      .eq('name', name.trim())
+      .maybeSingle()
+
+    if (existing) {
+      setError('その名前はすでに登録されています')
+      setLoading(false)
+      return
+    }
+
+    // 生徒を登録
+    const { data: newStudent, error: err } = await supabase
+      .from('students')
+      .insert({ name: name.trim(), school_id: school.id, pin })
+      .select()
+      .single()
+
+    if (err || !newStudent) {
+      setError('登録に失敗しました。もう一度試してください。')
+      setLoading(false)
+      return
+    }
+
+    // 既存の宿題に対してsubmissionレコードを作成
+    const { data: hwList } = await supabase
+      .from('homework')
+      .select('id')
+      .eq('school_id', school.id)
+
+    if (hwList && hwList.length > 0) {
+      await supabase.from('submissions').insert(
+        hwList.map(hw => ({ homework_id: hw.id, student_id: newStudent.id, submitted: false }))
+      )
+    }
+
+    setLoading(false)
+    onSuccess(newStudent) // PINは設定済みなのでそのまま自動ログイン
+  }
+
+  return (
+    <div style={{ maxWidth: 400, margin: '0 auto', padding: '20px' }}>
+      <button onClick={onBack} style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        background: 'none', border: 'none', color: 'var(--text-muted)',
+        fontWeight: 600, fontSize: '0.88rem', marginBottom: 32, padding: 0, cursor: 'pointer',
+      }}>
+        <ArrowLeft size={16} /> 名前一覧に戻る
+      </button>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 28 }}>
+        <div style={{
+          width: 40, height: 40, borderRadius: '10px',
+          background: '#7c3aed18', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', color: '#7c3aed',
+        }}><School size={20} /></div>
+        <div>
+          <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>新規登録</div>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{school.name}</div>
+        </div>
+      </div>
+
+      <Field label="名前">
+        <input
+          style={inputStyle}
+          placeholder="例：山田 太郎"
+          value={name}
+          onChange={e => { setName(e.target.value); setError('') }}
+          onKeyDown={e => e.key === 'Enter' && register()}
+          autoFocus
+        />
+      </Field>
+
+      <Field label="PIN（4〜6桁の数字）">
+        <input
+          type="password"
+          inputMode="numeric"
+          maxLength={6}
+          style={{ ...inputStyle, fontFamily: 'var(--mono)', letterSpacing: '0.2em', fontSize: '1.1rem' }}
+          placeholder="••••••"
+          value={pin}
+          onChange={e => { setPin(e.target.value.replace(/\D/g, '')); setError('') }}
+        />
+      </Field>
+
+      <Field label="PINの確認">
+        <input
+          type="password"
+          inputMode="numeric"
+          maxLength={6}
+          style={{
+            ...inputStyle,
+            fontFamily: 'var(--mono)', letterSpacing: '0.2em', fontSize: '1.1rem',
+            borderColor: confirmPin && pin !== confirmPin ? 'var(--danger)' : 'var(--border)',
+          }}
+          placeholder="••••••"
+          value={confirmPin}
+          onChange={e => { setConfirmPin(e.target.value.replace(/\D/g, '')); setError('') }}
+          onKeyDown={e => e.key === 'Enter' && register()}
+        />
+        {confirmPin && pin !== confirmPin && (
+          <div style={{ fontSize: '0.78rem', color: 'var(--danger)', marginTop: 4 }}>PINが一致しません</div>
+        )}
+      </Field>
+
+      {error && (
+        <div style={{
+          padding: '10px 14px', borderRadius: 8,
+          background: 'var(--danger-light)', color: 'var(--danger)',
+          fontSize: '0.85rem', marginBottom: 16,
+        }}>{error}</div>
+      )}
+
+      <Btn onClick={register} disabled={loading || !name || !pin || !confirmPin}>
+        {loading ? <Loader size={15} /> : <GraduationCap size={15} />}
+        {loading ? '登録中...' : '登録する'}
+      </Btn>
+    </div>
+  )
+}
+
 // ── PIN認証 ──────────────────────────────────────
 
 function StudentPINEntry({ student, onSuccess, onBack }) {
@@ -943,9 +1085,32 @@ function StudentMode({ onBack }) {
   const [school, setSchool] = useState(null)
   const [student, setStudent] = useState(null)
   const [pinVerified, setPinVerified] = useState(false)
+  const [registering, setRegistering] = useState(false)
 
   if (!school) return <StudentSchoolSelect onSelect={setSchool} onBack={onBack} />
-  if (!student) return <StudentNameSelect school={school} onSelect={setStudent} onBack={() => setSchool(null)} />
+
+  if (!student) {
+    if (registering) return (
+      <StudentRegister
+        school={school}
+        onSuccess={newStudent => {
+          setStudent(newStudent)
+          setPinVerified(true) // 登録時にPINを設定済みなので認証不要
+          setRegistering(false)
+        }}
+        onBack={() => setRegistering(false)}
+      />
+    )
+    return (
+      <StudentNameSelect
+        school={school}
+        onSelect={setStudent}
+        onRegister={() => setRegistering(true)}
+        onBack={() => setSchool(null)}
+      />
+    )
+  }
+
   if (!pinVerified) return (
     <StudentPINEntry
       student={student}
@@ -1014,7 +1179,7 @@ function StudentSchoolSelect({ onSelect, onBack }) {
   )
 }
 
-function StudentNameSelect({ school, onSelect, onBack }) {
+function StudentNameSelect({ school, onSelect, onRegister, onBack }) {
   const [students, setStudents] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -1045,7 +1210,10 @@ function StudentNameSelect({ school, onSelect, onBack }) {
       {loading ? (
         <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}><Loader size={24} /></div>
       ) : students.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>生徒が登録されていません</div>
+        <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
+          <div style={{ marginBottom: 16 }}>まだ登録された生徒がいません</div>
+          <Btn onClick={onRegister}><GraduationCap size={15} />最初に登録する</Btn>
+        </div>
       ) : (
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '14px', overflow: 'hidden' }}>
           {students.map((s, i) => (
@@ -1067,6 +1235,23 @@ function StudentNameSelect({ school, onSelect, onBack }) {
               <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{s.name}</div>
             </button>
           ))}
+        </div>
+      )}
+
+      {/* 新規登録リンク */}
+      {students.length > 0 && (
+        <div style={{
+          marginTop: 20, padding: '16px 20px',
+          background: 'var(--surface)', border: '1px solid var(--border)',
+          borderRadius: '14px', display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between',
+        }}>
+          <span style={{ fontSize: '0.88rem', color: 'var(--text-muted)' }}>
+            名前が見つからない場合
+          </span>
+          <Btn small onClick={onRegister}>
+            <Plus size={14} />新規登録
+          </Btn>
         </div>
       )}
     </div>
