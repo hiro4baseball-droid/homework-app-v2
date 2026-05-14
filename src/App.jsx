@@ -733,12 +733,81 @@ function AddHomeworkModal({ onAdd, onClose }) {
   )
 }
 
+// ── 先生用：生徒タスク閲覧 ──────────────────────────
+function TeacherStudentTasksView({ studentId }) {
+  const [tasks, setTasks] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    supabase
+      .from('student_tasks')
+      .select('*')
+      .eq('student_id', studentId)
+      .order('created_at')
+      .then(({ data }) => {
+        setTasks(data || [])
+        setLoading(false)
+      })
+  }, [studentId])
+
+  const pending = tasks.filter(t => !t.completed)
+  const done = tasks.filter(t => t.completed)
+
+  return (
+    <div style={{
+      borderTop: '1px solid var(--border)',
+      background: '#faf8ff',
+      padding: '10px 20px 14px',
+    }}>
+      <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#7c3aed', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+        <ClipboardList size={13} /> 個人タスク
+      </div>
+      {loading ? (
+        <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}><Loader size={14} /></div>
+      ) : tasks.length === 0 ? (
+        <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>タスクはありません</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {[...pending, ...done].map(task => (
+            <div key={task.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {task.completed
+                ? <CheckCircle size={14} color="#7c3aed" />
+                : <Circle size={14} color="var(--text-muted)" />
+              }
+              <span style={{
+                fontSize: '0.85rem',
+                color: task.completed ? 'var(--text-muted)' : 'var(--text)',
+                textDecoration: task.completed ? 'line-through' : 'none',
+              }}>{task.title}</span>
+              {task.due_date && (
+                <span style={{
+                  fontSize: '0.75rem',
+                  color: task.completed ? 'var(--text-muted)' : (new Date(task.due_date) < new Date() ? '#e53e3e' : 'var(--text-muted)'),
+                  display: 'flex', alignItems: 'center', gap: 2,
+                }}>
+                  <CalendarDays size={11} />{task.due_date}
+                </span>
+              )}
+              {task.completed && task.completed_at && (
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: 2 }}>
+                  完了: {new Date(task.completed_at).toLocaleDateString('ja-JP')}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── 生徒タブ ────────────────────────────────────
 
 function StudentsTab({ students, homework, submissions, onAdd, onDelete, onUpdatePin, showAdd, setShowAdd }) {
   const [name, setName] = useState('')
   const [editingPin, setEditingPin] = useState(null)
   const [pinInput, setPinInput] = useState('')
+  const [expandedTasks, setExpandedTasks] = useState(null)
 
   const handle = () => {
     if (!name.trim()) return
@@ -773,87 +842,102 @@ function StudentsTab({ students, homework, submissions, onAdd, onDelete, onUpdat
               return !sub?.submitted
             })
             return (
-              <div key={s.id} style={{
-                display: 'flex', alignItems: 'center', padding: '14px 20px',
-                borderBottom: i < students.length - 1 ? '1px solid var(--border)' : 'none', gap: 12,
-                flexWrap: 'wrap',
-              }}>
-                <div style={{
-                  width: 36, height: 36, borderRadius: '50%',
-                  background: 'var(--accent-light)', color: 'var(--accent)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontWeight: 700, fontSize: '0.85rem', flexShrink: 0,
-                }}>{s.name[0]}</div>
+              <div key={s.id} style={{ borderBottom: i < students.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{
+                    width: 36, height: 36, borderRadius: '50%',
+                    background: 'var(--accent-light)', color: 'var(--accent)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontWeight: 700, fontSize: '0.85rem', flexShrink: 0,
+                  }}>{s.name[0]}</div>
 
-                <div style={{ flex: 1, minWidth: 120 }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{s.name}</div>
-                  {notSubmitted.length > 0 ? (
-                    <div style={{ fontSize: '0.78rem', color: 'var(--danger)', marginTop: 2 }}>
-                      未提出: {notSubmitted.map(h => h.title).join('、')}
+                  <div style={{ flex: 1, minWidth: 120 }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{s.name}</div>
+                    {notSubmitted.length > 0 ? (
+                      <div style={{ fontSize: '0.78rem', color: 'var(--danger)', marginTop: 2 }}>
+                        未提出: {notSubmitted.map(h => h.title).join('、')}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '0.78rem', color: 'var(--accent)', marginTop: 2 }}>すべて提出済み ✓</div>
+                    )}
+                  </div>
+
+                  {/* PIN管理 */}
+                  {editingPin === s.id ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input
+                        type="text"
+                        maxLength={6}
+                        value={pinInput}
+                        onChange={e => setPinInput(e.target.value.replace(/\D/g, ''))}
+                        placeholder="数字6桁"
+                        style={{
+                          width: 90, padding: '5px 8px', textAlign: 'center',
+                          border: '1px solid var(--accent)', borderRadius: 6,
+                          fontSize: '0.88rem', fontFamily: 'var(--mono)', outline: 'none',
+                          background: 'var(--bg)',
+                        }}
+                        autoFocus
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') savePin(s.id)
+                          if (e.key === 'Escape') setEditingPin(null)
+                        }}
+                      />
+                      <button onClick={() => savePin(s.id)} style={{
+                        fontSize: '0.75rem', color: '#fff', background: 'var(--accent)',
+                        border: 'none', borderRadius: 6, padding: '5px 10px', fontWeight: 700, cursor: 'pointer',
+                      }}>保存</button>
+                      <button onClick={() => setEditingPin(null)} style={{
+                        fontSize: '0.75rem', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer',
+                      }}>×</button>
                     </div>
                   ) : (
-                    <div style={{ fontSize: '0.78rem', color: 'var(--accent)', marginTop: 2 }}>すべて提出済み ✓</div>
-                  )}
-                </div>
-
-                {/* PIN管理 */}
-                {editingPin === s.id ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <input
-                      type="text"
-                      maxLength={6}
-                      value={pinInput}
-                      onChange={e => setPinInput(e.target.value.replace(/\D/g, ''))}
-                      placeholder="数字6桁"
-                      style={{
-                        width: 90, padding: '5px 8px', textAlign: 'center',
-                        border: '1px solid var(--accent)', borderRadius: 6,
-                        fontSize: '0.88rem', fontFamily: 'var(--mono)', outline: 'none',
-                        background: 'var(--bg)',
-                      }}
-                      autoFocus
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') savePin(s.id)
-                        if (e.key === 'Escape') setEditingPin(null)
-                      }}
-                    />
-                    <button onClick={() => savePin(s.id)} style={{
-                      fontSize: '0.75rem', color: '#fff', background: 'var(--accent)',
-                      border: 'none', borderRadius: 6, padding: '5px 10px', fontWeight: 700, cursor: 'pointer',
-                    }}>保存</button>
-                    <button onClick={() => setEditingPin(null)} style={{
-                      fontSize: '0.75rem', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer',
-                    }}>×</button>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{
-                      display: 'flex', alignItems: 'center', gap: 4,
-                      padding: '4px 10px', borderRadius: '999px',
-                      background: s.pin ? 'var(--accent-light)' : 'var(--surface2)',
-                      border: `1px solid ${s.pin ? 'var(--accent)' : 'var(--border)'}`,
-                    }}>
-                      <Key size={11} color={s.pin ? 'var(--accent)' : 'var(--text-muted)'} />
-                      <span style={{
-                        fontSize: '0.8rem', fontFamily: 'var(--mono)', fontWeight: 700,
-                        color: s.pin ? 'var(--accent)' : 'var(--text-muted)',
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 4,
+                        padding: '4px 10px', borderRadius: '999px',
+                        background: s.pin ? 'var(--accent-light)' : 'var(--surface2)',
+                        border: `1px solid ${s.pin ? 'var(--accent)' : 'var(--border)'}`,
                       }}>
-                        {s.pin || '未設定'}
-                      </span>
+                        <Key size={11} color={s.pin ? 'var(--accent)' : 'var(--text-muted)'} />
+                        <span style={{
+                          fontSize: '0.8rem', fontFamily: 'var(--mono)', fontWeight: 700,
+                          color: s.pin ? 'var(--accent)' : 'var(--text-muted)',
+                        }}>
+                          {s.pin || '未設定'}
+                        </span>
+                      </div>
+                      <button onClick={() => startEditPin(s)} style={{
+                        fontSize: '0.72rem', color: 'var(--text-muted)', background: 'none',
+                        border: 'none', cursor: 'pointer', textDecoration: 'underline',
+                      }}>
+                        {s.pin ? '変更' : 'PINを設定'}
+                      </button>
                     </div>
-                    <button onClick={() => startEditPin(s)} style={{
-                      fontSize: '0.72rem', color: 'var(--text-muted)', background: 'none',
-                      border: 'none', cursor: 'pointer', textDecoration: 'underline',
-                    }}>
-                      {s.pin ? '変更' : 'PINを設定'}
-                    </button>
-                  </div>
-                )}
+                  )}
 
-                <button onClick={() => onDelete(s.id)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4, cursor: 'pointer' }}
-                  onMouseEnter={e => e.currentTarget.style.color = 'var(--danger)'}
-                  onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
-                ><Trash2 size={15} /></button>
+                  <button
+                    onClick={() => setExpandedTasks(expandedTasks === s.id ? null : s.id)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 4,
+                      background: expandedTasks === s.id ? 'var(--accent-light)' : 'none',
+                      border: '1px solid var(--border)', borderRadius: 8,
+                      padding: '4px 10px', fontSize: '0.78rem',
+                      color: expandedTasks === s.id ? 'var(--accent)' : 'var(--text-muted)',
+                      cursor: 'pointer', fontWeight: 600,
+                    }}
+                  >
+                    <ClipboardList size={13} />タスク
+                    {expandedTasks === s.id ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                  </button>
+                  <button onClick={() => onDelete(s.id)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4, cursor: 'pointer' }}
+                    onMouseEnter={e => e.currentTarget.style.color = 'var(--danger)'}
+                    onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+                  ><Trash2 size={15} /></button>
+                </div>
+                {expandedTasks === s.id && (
+                  <TeacherStudentTasksView studentId={s.id} />
+                )}
               </div>
             )
           })}
