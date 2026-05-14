@@ -1,5 +1,5 @@
 -- ════════════════════════════════════════════════════════════
--- PHASE 1 マイグレーション
+-- マイグレーション（PHASE 1 + PHASE 2）
 -- Supabase SQL Editor で実行してください
 -- https://supabase.com/dashboard/project/wagrqpqscxkviloqwlbb/sql/new
 -- ════════════════════════════════════════════════════════════
@@ -52,3 +52,31 @@ BEGIN
   END IF;
 END
 $do$;
+
+-- ════════════════════════════════════════════════════════════
+-- PHASE 2 マイグレーション
+-- ════════════════════════════════════════════════════════════
+
+-- 1. submissions テーブルに submitted_at カラムを追加
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ DEFAULT NULL;
+
+-- 2. 生徒自身のタスクテーブル
+CREATE TABLE IF NOT EXISTS student_tasks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  due_date DATE DEFAULT NULL,
+  completed BOOLEAN DEFAULT FALSE,
+  completed_at TIMESTAMPTZ DEFAULT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 3. RLS 有効化 + ポリシー
+ALTER TABLE student_tasks ENABLE ROW LEVEL SECURITY;
+DO $do2$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename='student_tasks' AND policyname='allow_all') THEN
+    CREATE POLICY "allow_all" ON student_tasks FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+END
+$do2$;

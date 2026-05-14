@@ -4,7 +4,7 @@ import {
   BookOpen, Users, ClipboardList, Plus, Trash2,
   ChevronDown, ChevronUp, CheckCircle, XCircle,
   School, ArrowLeft, Loader, Camera, X, GraduationCap,
-  FileText, Image, Key,
+  FileText, Image, Key, CalendarDays, Circle,
 } from 'lucide-react'
 
 const SUBJECTS = ['数学', '国語', '英語', '理科', '社会', '音楽', '美術', '体育', 'その他']
@@ -1346,13 +1346,13 @@ function StudentHomeworkList({ school, student, onBack }) {
 
       {loading ? (
         <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}><Loader size={24} /></div>
-      ) : homework.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
-          宿題が登録されていません
-        </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {homework.map(hw => (
+          {homework.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
+              宿題が登録されていません
+            </div>
+          ) : homework.map(hw => (
             <StudentHomeworkCard
               key={hw.id}
               hw={hw}
@@ -1366,8 +1366,204 @@ function StudentHomeworkList({ school, student, onBack }) {
               onSubmit={updateSubmission}
             />
           ))}
+          <StudentTaskSection student={student} />
         </div>
       )}
+    </div>
+  )
+}
+
+function StudentTaskSection({ student }) {
+  const [tasks, setTasks] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [adding, setAdding] = useState(false)
+  const [newTitle, setNewTitle] = useState('')
+  const [newDue, setNewDue] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    supabase
+      .from('student_tasks')
+      .select('*')
+      .eq('student_id', student.id)
+      .order('created_at')
+      .then(({ data }) => {
+        setTasks(data || [])
+        setLoading(false)
+      })
+  }, [student.id])
+
+  async function addTask() {
+    if (!newTitle.trim()) return
+    setSaving(true)
+    const { data } = await supabase
+      .from('student_tasks')
+      .insert({ student_id: student.id, title: newTitle.trim(), due_date: newDue || null })
+      .select()
+      .single()
+    if (data) setTasks(prev => [...prev, data])
+    setNewTitle('')
+    setNewDue('')
+    setAdding(false)
+    setSaving(false)
+  }
+
+  async function toggleTask(task) {
+    const completed = !task.completed
+    const completed_at = completed ? new Date().toISOString() : null
+    const { data } = await supabase
+      .from('student_tasks')
+      .update({ completed, completed_at })
+      .eq('id', task.id)
+      .select()
+      .single()
+    if (data) setTasks(prev => prev.map(t => t.id === task.id ? data : t))
+  }
+
+  async function deleteTask(id) {
+    await supabase.from('student_tasks').delete().eq('id', id)
+    setTasks(prev => prev.filter(t => t.id !== id))
+  }
+
+  const pending = tasks.filter(t => !t.completed)
+  const done = tasks.filter(t => t.completed)
+
+  return (
+    <div style={{
+      background: 'var(--surface)', border: '1px solid var(--border)',
+      borderRadius: '16px', overflow: 'hidden',
+    }}>
+      <div style={{
+        padding: '14px 18px', display: 'flex', alignItems: 'center',
+        justifyContent: 'space-between', borderBottom: '1px solid var(--border)',
+        background: '#f5f0ff',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: '0.95rem', color: '#7c3aed' }}>
+          <ClipboardList size={16} />
+          自分のタスク
+        </div>
+        <button
+          onClick={() => setAdding(v => !v)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            background: '#7c3aed', color: '#fff', border: 'none',
+            borderRadius: '8px', padding: '5px 12px',
+            fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
+          }}
+        >
+          <Plus size={13} /> タスクを追加
+        </button>
+      </div>
+
+      {adding && (
+        <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--border)', background: '#faf8ff' }}>
+          <input
+            autoFocus
+            value={newTitle}
+            onChange={e => setNewTitle(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && addTask()}
+            placeholder="タスク名を入力..."
+            style={{
+              width: '100%', padding: '8px 12px', borderRadius: '8px',
+              border: '1px solid var(--border)', fontSize: '0.9rem',
+              marginBottom: 8, boxSizing: 'border-box',
+            }}
+          />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+              <CalendarDays size={13} />
+              <input
+                type="date"
+                value={newDue}
+                onChange={e => setNewDue(e.target.value)}
+                style={{
+                  border: '1px solid var(--border)', borderRadius: '6px',
+                  padding: '4px 8px', fontSize: '0.82rem', color: 'var(--text)',
+                }}
+              />
+            </div>
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+              <button onClick={() => { setAdding(false); setNewTitle(''); setNewDue('') }} style={{
+                background: 'none', border: '1px solid var(--border)', borderRadius: '7px',
+                padding: '5px 12px', fontSize: '0.82rem', cursor: 'pointer', color: 'var(--text-muted)',
+              }}>キャンセル</button>
+              <button onClick={addTask} disabled={saving || !newTitle.trim()} style={{
+                background: '#7c3aed', color: '#fff', border: 'none',
+                borderRadius: '7px', padding: '5px 14px', fontSize: '0.82rem',
+                fontWeight: 600, cursor: 'pointer', opacity: !newTitle.trim() ? 0.5 : 1,
+              }}>
+                {saving ? <Loader size={13} /> : '追加'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ padding: '8px 0' }}>
+        {loading ? (
+          <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}><Loader size={18} /></div>
+        ) : tasks.length === 0 && !adding ? (
+          <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+            タスクはまだありません
+          </div>
+        ) : (
+          <>
+            {pending.map(task => (
+              <TaskRow key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} />
+            ))}
+            {done.length > 0 && pending.length > 0 && (
+              <div style={{ height: 1, background: 'var(--border)', margin: '4px 18px' }} />
+            )}
+            {done.map(task => (
+              <TaskRow key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} />
+            ))}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function TaskRow({ task, onToggle, onDelete }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10,
+      padding: '9px 18px', transition: 'background 0.12s',
+    }}
+      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
+      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+    >
+      <button
+        onClick={() => onToggle(task)}
+        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: task.completed ? '#7c3aed' : 'var(--text-muted)', display: 'flex', flexShrink: 0 }}
+      >
+        {task.completed ? <CheckCircle size={20} /> : <Circle size={20} />}
+      </button>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: '0.9rem', fontWeight: 500,
+          color: task.completed ? 'var(--text-muted)' : 'var(--text)',
+          textDecoration: task.completed ? 'line-through' : 'none',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>{task.title}</div>
+        {task.due_date && (
+          <div style={{ fontSize: '0.75rem', color: task.completed ? 'var(--text-muted)' : (new Date(task.due_date) < new Date() ? '#e53e3e' : 'var(--text-muted)'), display: 'flex', alignItems: 'center', gap: 3, marginTop: 2 }}>
+            <CalendarDays size={11} />
+            {task.due_date}
+            {task.completed && task.completed_at && (
+              <span style={{ marginLeft: 6 }}>— 完了: {new Date(task.completed_at).toLocaleDateString('ja-JP')}</span>
+            )}
+          </div>
+        )}
+      </div>
+      <button
+        onClick={() => onDelete(task.id)}
+        style={{ background: 'none', border: 'none', padding: 4, cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, borderRadius: 6 }}
+        onMouseEnter={e => e.currentTarget.style.color = '#e53e3e'}
+        onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+      >
+        <Trash2 size={14} />
+      </button>
     </div>
   )
 }
