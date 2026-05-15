@@ -3,14 +3,9 @@ const ANTHROPIC_MODEL = 'claude-haiku-4-5-20251001'
 
 export function getApiKeys() {
   return {
-    gemini: localStorage.getItem('hw_gemini_key') || '',
-    anthropic: localStorage.getItem('hw_anthropic_key') || '',
+    gemini: import.meta.env.VITE_GEMINI_API_KEY || '',
+    anthropic: import.meta.env.VITE_ANTHROPIC_API_KEY || '',
   }
-}
-
-export function saveApiKeys({ gemini, anthropic }) {
-  if (gemini !== undefined) localStorage.setItem('hw_gemini_key', gemini)
-  if (anthropic !== undefined) localStorage.setItem('hw_anthropic_key', anthropic)
 }
 
 async function urlToBase64(url) {

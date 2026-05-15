@@ -5,9 +5,9 @@ import {
   ChevronDown, ChevronUp, CheckCircle, XCircle,
   School, ArrowLeft, Loader, Camera, X, GraduationCap,
   FileText, Image, Key, CalendarDays, Circle,
-  Settings, AlertCircle, RefreshCw, Copy, Sparkles,
+  AlertCircle, RefreshCw, Copy, Sparkles,
 } from 'lucide-react'
-import { analyzeHomeworkPhotos, generateParentReport, getApiKeys, saveApiKeys } from './aiClient'
+import { analyzeHomeworkPhotos, generateParentReport, getApiKeys } from './aiClient'
 
 const SUBJECTS = ['数学', '国語', '英語', '理科', '社会', '音楽', '美術', '体育', 'その他']
 const SUBJECT_COLORS = {
@@ -112,101 +112,6 @@ const inputStyle = {
   border: '1px solid var(--border)', borderRadius: '8px',
   fontSize: '0.95rem', outline: 'none', background: 'var(--bg)',
   boxSizing: 'border-box',
-}
-
-// ── AI設定タブ ───────────────────────────────────
-function SettingsTab() {
-  const [keys, setKeys] = useState(() => getApiKeys())
-  const [saved, setSaved] = useState(false)
-  const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState(null)
-
-  function save() {
-    saveApiKeys(keys)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
-  }
-
-  async function testConnection() {
-    setTesting(true)
-    setTestResult(null)
-    try {
-      const text = await generateParentReport('テスト太郎', '2025年5月', {
-        submitted: 4, total: 5, tasksDone: 3, homeworkDetails: ['数学プリント', '国語ノート'],
-      })
-      setTestResult({ ok: true, preview: text.slice(0, 100) })
-    } catch (e) {
-      setTestResult({ ok: false, error: e.message })
-    }
-    setTesting(false)
-  }
-
-  return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-        <Sparkles size={18} color="var(--accent)" />
-        <h3 style={{ fontWeight: 700, fontSize: '1rem', margin: 0 }}>AI機能の設定</h3>
-      </div>
-      <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 20 }}>
-        写真のAI自動チェックと保護者向け月次レポート生成に使用するAPIキーを設定します。
-        Gemini が優先され、無料枠がなくなると Anthropic に自動切り替えされます。
-      </p>
-
-      <Field label="Gemini APIキー（メイン）">
-        <input
-          style={inputStyle}
-          type="password"
-          value={keys.gemini}
-          onChange={e => setKeys(k => ({ ...k, gemini: e.target.value }))}
-          placeholder="AIzaSy..."
-        />
-        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
-          取得先: <strong>aistudio.google.com</strong> → Get API key（無料）
-        </div>
-      </Field>
-
-      <Field label="Anthropic APIキー（フォールバック）">
-        <input
-          style={inputStyle}
-          type="password"
-          value={keys.anthropic}
-          onChange={e => setKeys(k => ({ ...k, anthropic: e.target.value }))}
-          placeholder="sk-ant-..."
-        />
-        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
-          取得先: <strong>console.anthropic.com</strong> → API Keys（有料）
-        </div>
-      </Field>
-
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <Btn onClick={save}>
-          {saved ? <CheckCircle size={14} /> : null}
-          {saved ? '保存しました' : '保存する'}
-        </Btn>
-        <Btn outline onClick={testConnection} disabled={testing}>
-          {testing ? <Loader size={14} /> : <RefreshCw size={14} />}
-          接続テスト
-        </Btn>
-      </div>
-
-      {testResult && (
-        <div style={{
-          marginTop: 14, padding: '12px 16px', borderRadius: 10,
-          background: testResult.ok ? 'var(--accent-light)' : '#fff5f5',
-          border: `1px solid ${testResult.ok ? 'var(--accent)' : '#fc8181'}`,
-          fontSize: '0.85rem',
-        }}>
-          {testResult.ok ? (
-            <><CheckCircle size={14} color="var(--accent)" style={{ verticalAlign: 'middle', marginRight: 6 }} />
-            接続成功 — 生成例: {testResult.preview}…</>
-          ) : (
-            <><AlertCircle size={14} color="#e53e3e" style={{ verticalAlign: 'middle', marginRight: 6 }} />
-            エラー: {testResult.error}</>
-          )}
-        </div>
-      )}
-    </div>
-  )
 }
 
 // ── 保護者レポートモーダル ───────────────────────────
@@ -619,7 +524,6 @@ function SchoolDetail({ school, onBack }) {
         {[
           { key: 'homework', label: '宿題一覧', icon: <ClipboardList size={15} /> },
           { key: 'students', label: '生徒管理', icon: <Users size={15} /> },
-          { key: 'settings', label: 'AI設定', icon: <Settings size={15} /> },
         ].map(({ key, label, icon }) => (
           <button key={key} onClick={() => setTab(key)} style={{
             padding: '7px 16px', border: 'none', borderRadius: '8px',
@@ -641,8 +545,6 @@ function SchoolDetail({ school, onBack }) {
           showAdd={showAddHW} setShowAdd={setShowAddHW}
           onRefresh={fetchAll}
         />
-      ) : tab === 'settings' ? (
-        <SettingsTab />
       ) : (
         <StudentsTab
           school={school}
