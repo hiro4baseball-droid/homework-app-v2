@@ -1842,12 +1842,12 @@ function StudentHomeworkCard({ hw, student, photos, scopeNote, submission, onAdd
       setSubmitPhase('ai')
       try {
         const urls = photos.map(p => photoUrl(p.file_path))
-        const result = await analyzeHomeworkPhotos(urls, hw.subject, hw.title)
-        if (result.pass) {
+        const aiResult = await analyzeHomeworkPhotos(urls, hw.subject, hw.title)
+        if (aiResult.pass) {
           aiStatus = 'pass'
         } else {
           aiStatus = 'fail'
-          aiFeedback = result.feedback || '自学メモや途中式が不足しています。写真を撮り直して再提出してください。'
+          aiFeedback = aiResult.feedback || '自学メモや途中式が不足しています。写真を撮り直して再提出してください。'
           needsResubmit = true
         }
       } catch (e) {
@@ -1864,26 +1864,30 @@ function StudentHomeworkCard({ hw, student, photos, scopeNote, submission, onAdd
       .eq('student_id', student.id)
       .maybeSingle()
 
-    const updateData = needsResubmit
+    // AI カラムあり版
+    const fullData = needsResubmit
       ? { submitted: false, submitted_at: null, ai_status: aiStatus, ai_feedback: aiFeedback, needs_resubmit: true }
       : { submitted: true, submitted_at: now, ai_status: aiStatus, ai_feedback: null, needs_resubmit: false }
 
-    let result
-    if (existing) {
-      const { data } = await supabase
-        .from('submissions')
-        .update(updateData)
-        .eq('id', existing.id)
-        .select()
-        .single()
-      result = data
-    } else {
-      const { data } = await supabase
-        .from('submissions')
-        .insert({ homework_id: hw.id, student_id: student.id, ...updateData })
-        .select()
-        .single()
-      result = data
+    // AI カラムなし版（マイグレーション未実行時のフォールバック）
+    const baseData = needsResubmit
+      ? { submitted: false, submitted_at: null }
+      : { submitted: true, submitted_at: now }
+
+    async function upsert(data) {
+      if (existing) {
+        return supabase.from('submissions').update(data).eq('id', existing.id).select().single()
+      } else {
+        return supabase.from('submissions').insert({ homework_id: hw.id, student_id: student.id, ...data }).select().single()
+      }
+    }
+
+    let { data: result, error } = await upsert(fullData)
+    if (error) {
+      // AI カラムが未追加の場合はベースデータで再試行
+      console.warn('AI columns not found, falling back:', error.message)
+      const { data: fallback } = await upsert(baseData)
+      result = fallback
     }
 
     if (result) onSubmit(result)
