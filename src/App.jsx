@@ -5,7 +5,9 @@ import {
   ChevronDown, ChevronUp, CheckCircle, XCircle,
   School, ArrowLeft, Loader, Camera, X, GraduationCap,
   FileText, Image, Key, CalendarDays, Circle,
+  Settings, AlertCircle, RefreshCw, Copy, Sparkles,
 } from 'lucide-react'
+import { analyzeHomeworkPhotos, generateParentReport, getApiKeys, saveApiKeys } from './aiClient'
 
 const SUBJECTS = ['数学', '国語', '英語', '理科', '社会', '音楽', '美術', '体育', 'その他']
 const SUBJECT_COLORS = {
@@ -110,6 +112,192 @@ const inputStyle = {
   border: '1px solid var(--border)', borderRadius: '8px',
   fontSize: '0.95rem', outline: 'none', background: 'var(--bg)',
   boxSizing: 'border-box',
+}
+
+// ── AI設定タブ ───────────────────────────────────
+function SettingsTab() {
+  const [keys, setKeys] = useState(() => getApiKeys())
+  const [saved, setSaved] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState(null)
+
+  function save() {
+    saveApiKeys(keys)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
+
+  async function testConnection() {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const text = await generateParentReport('テスト太郎', '2025年5月', {
+        submitted: 4, total: 5, tasksDone: 3, homeworkDetails: ['数学プリント', '国語ノート'],
+      })
+      setTestResult({ ok: true, preview: text.slice(0, 100) })
+    } catch (e) {
+      setTestResult({ ok: false, error: e.message })
+    }
+    setTesting(false)
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
+        <Sparkles size={18} color="var(--accent)" />
+        <h3 style={{ fontWeight: 700, fontSize: '1rem', margin: 0 }}>AI機能の設定</h3>
+      </div>
+      <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 20 }}>
+        写真のAI自動チェックと保護者向け月次レポート生成に使用するAPIキーを設定します。
+        Gemini が優先され、無料枠がなくなると Anthropic に自動切り替えされます。
+      </p>
+
+      <Field label="Gemini APIキー（メイン）">
+        <input
+          style={inputStyle}
+          type="password"
+          value={keys.gemini}
+          onChange={e => setKeys(k => ({ ...k, gemini: e.target.value }))}
+          placeholder="AIzaSy..."
+        />
+        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
+          取得先: <strong>aistudio.google.com</strong> → Get API key（無料）
+        </div>
+      </Field>
+
+      <Field label="Anthropic APIキー（フォールバック）">
+        <input
+          style={inputStyle}
+          type="password"
+          value={keys.anthropic}
+          onChange={e => setKeys(k => ({ ...k, anthropic: e.target.value }))}
+          placeholder="sk-ant-..."
+        />
+        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
+          取得先: <strong>console.anthropic.com</strong> → API Keys（有料）
+        </div>
+      </Field>
+
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <Btn onClick={save}>
+          {saved ? <CheckCircle size={14} /> : null}
+          {saved ? '保存しました' : '保存する'}
+        </Btn>
+        <Btn outline onClick={testConnection} disabled={testing}>
+          {testing ? <Loader size={14} /> : <RefreshCw size={14} />}
+          接続テスト
+        </Btn>
+      </div>
+
+      {testResult && (
+        <div style={{
+          marginTop: 14, padding: '12px 16px', borderRadius: 10,
+          background: testResult.ok ? 'var(--accent-light)' : '#fff5f5',
+          border: `1px solid ${testResult.ok ? 'var(--accent)' : '#fc8181'}`,
+          fontSize: '0.85rem',
+        }}>
+          {testResult.ok ? (
+            <><CheckCircle size={14} color="var(--accent)" style={{ verticalAlign: 'middle', marginRight: 6 }} />
+            接続成功 — 生成例: {testResult.preview}…</>
+          ) : (
+            <><AlertCircle size={14} color="#e53e3e" style={{ verticalAlign: 'middle', marginRight: 6 }} />
+            エラー: {testResult.error}</>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── 保護者レポートモーダル ───────────────────────────
+function ParentReportModal({ student, school, onClose }) {
+  const now = new Date()
+  const defaultMonth = `${now.getFullYear()}年${now.getMonth() + 1}月`
+  const [month, setMonth] = useState(defaultMonth)
+  const [generating, setGenerating] = useState(false)
+  const [report, setReport] = useState('')
+  const [error, setError] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  async function generate() {
+    setGenerating(true)
+    setError('')
+    setReport('')
+    try {
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString()
+
+      const [{ data: subs }, { data: tasks }, { data: hw }] = await Promise.all([
+        supabase.from('submissions').select('*, homework(title)').eq('student_id', student.id),
+        supabase.from('student_tasks').select('*').eq('student_id', student.id).eq('completed', true)
+          .gte('completed_at', monthStart).lte('completed_at', monthEnd),
+        supabase.from('homework').select('*').eq('school_id', school.id),
+      ])
+
+      const thisMonthSubs = (subs || []).filter(s =>
+        s.submitted && s.submitted_at && s.submitted_at >= monthStart && s.submitted_at <= monthEnd
+      )
+      const total = (hw || []).length
+      const tasksDone = (tasks || []).length
+      const homeworkDetails = thisMonthSubs.map(s => s.homework?.title).filter(Boolean)
+
+      const text = await generateParentReport(student.name, month, {
+        submitted: thisMonthSubs.length, total, tasksDone, homeworkDetails,
+      })
+      setReport(text)
+    } catch (e) {
+      setError(e.message)
+    }
+    setGenerating(false)
+  }
+
+  function copyToClipboard() {
+    navigator.clipboard.writeText(report)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <Modal title={`${student.name} — 保護者レポート生成`} onClose={onClose}>
+      <Field label="対象月">
+        <input style={inputStyle} value={month} onChange={e => setMonth(e.target.value)} placeholder="例: 2025年5月" />
+      </Field>
+
+      {!report && (
+        <Btn onClick={generate} disabled={generating}>
+          {generating ? <Loader size={14} /> : <Sparkles size={14} />}
+          {generating ? 'AI生成中...' : 'レポートを生成'}
+        </Btn>
+      )}
+
+      {error && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#e53e3e', fontSize: '0.85rem', marginTop: 12 }}>
+          <AlertCircle size={14} /> {error}
+        </div>
+      )}
+
+      {report && (
+        <>
+          <div style={{
+            padding: '16px', background: 'var(--surface2)', borderRadius: 10,
+            fontSize: '0.9rem', lineHeight: 1.75, whiteSpace: 'pre-wrap', marginTop: 12,
+            border: '1px solid var(--border)',
+          }}>
+            {report}
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <Btn onClick={copyToClipboard}>
+              <Copy size={14} />
+              {copied ? 'コピーしました ✓' : 'コピー'}
+            </Btn>
+            <Btn outline onClick={() => { setReport(''); setError('') }}>
+              <RefreshCw size={14} />再生成
+            </Btn>
+          </div>
+        </>
+      )}
+    </Modal>
+  )
 }
 
 function PhotoGrid({ photos, onDelete }) {
@@ -427,10 +615,11 @@ function SchoolDetail({ school, onBack }) {
         <StatCard icon={<XCircle size={20} />} label="未提出ありの生徒" value={notSubmittedStudents.length} sub="いずれかの宿題で未提出" />
       </div>
 
-      <div style={{ display: 'flex', gap: 4, marginBottom: 20 }}>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 20, flexWrap: 'wrap' }}>
         {[
           { key: 'homework', label: '宿題一覧', icon: <ClipboardList size={15} /> },
           { key: 'students', label: '生徒管理', icon: <Users size={15} /> },
+          { key: 'settings', label: 'AI設定', icon: <Settings size={15} /> },
         ].map(({ key, label, icon }) => (
           <button key={key} onClick={() => setTab(key)} style={{
             padding: '7px 16px', border: 'none', borderRadius: '8px',
@@ -452,8 +641,11 @@ function SchoolDetail({ school, onBack }) {
           showAdd={showAddHW} setShowAdd={setShowAddHW}
           onRefresh={fetchAll}
         />
+      ) : tab === 'settings' ? (
+        <SettingsTab />
       ) : (
         <StudentsTab
+          school={school}
           students={students} homework={homework} submissions={submissions}
           onAdd={addStudent} onDelete={deleteStudent} onUpdatePin={updateStudentPin}
           showAdd={showAddSt} setShowAdd={setShowAddSt}
@@ -638,15 +830,22 @@ function HomeworkCard({ hw, students, submissions, photoSubmissions, onToggle, o
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {submitted.map(s => {
                   const sub = submissions.find(sb => sb.homework_id === hw.id && sb.student_id === s.id)
+                  const aiPass = sub?.ai_status === 'pass'
+                  const aiResubmit = sub?.needs_resubmit
                   return (
                     <div key={s.id} style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                       <button onClick={() => onToggle(hw.id, s.id)} style={{
                         padding: '5px 12px', borderRadius: '999px',
-                        border: '1px solid var(--accent)', background: 'var(--accent-light)',
-                        color: 'var(--accent)', fontSize: '0.8rem', fontWeight: 500, cursor: 'pointer',
+                        border: `1px solid ${aiResubmit ? '#dd6b20' : 'var(--accent)'}`,
+                        background: aiResubmit ? '#fff8f0' : 'var(--accent-light)',
+                        color: aiResubmit ? '#dd6b20' : 'var(--accent)',
+                        fontSize: '0.8rem', fontWeight: 500, cursor: 'pointer',
                       }} title="クリックで未提出に戻す">{s.name}</button>
+                      <span style={{ fontSize: '0.62rem', color: aiResubmit ? '#dd6b20' : aiPass ? 'var(--accent)' : 'var(--text-muted)' }}>
+                        {aiResubmit ? '⚠ 要再提出' : aiPass ? '✓ AI確認済' : ''}
+                      </span>
                       {sub?.submitted_at && (
-                        <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                        <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)' }}>
                           {fmtDate(sub.submitted_at)}
                         </span>
                       )}
@@ -803,11 +1002,12 @@ function TeacherStudentTasksView({ studentId }) {
 
 // ── 生徒タブ ────────────────────────────────────
 
-function StudentsTab({ students, homework, submissions, onAdd, onDelete, onUpdatePin, showAdd, setShowAdd }) {
+function StudentsTab({ school, students, homework, submissions, onAdd, onDelete, onUpdatePin, showAdd, setShowAdd }) {
   const [name, setName] = useState('')
   const [editingPin, setEditingPin] = useState(null)
   const [pinInput, setPinInput] = useState('')
   const [expandedTasks, setExpandedTasks] = useState(null)
+  const [reportStudent, setReportStudent] = useState(null)
 
   const handle = () => {
     if (!name.trim()) return
@@ -930,6 +1130,20 @@ function StudentsTab({ students, homework, submissions, onAdd, onDelete, onUpdat
                     <ClipboardList size={13} />タスク
                     {expandedTasks === s.id ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                   </button>
+                  <button
+                    onClick={() => setReportStudent(s)}
+                    title="保護者レポートを生成"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 4,
+                      background: 'none', border: '1px solid var(--border)', borderRadius: 8,
+                      padding: '4px 10px', fontSize: '0.78rem', color: 'var(--text-muted)',
+                      cursor: 'pointer', fontWeight: 600,
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = '#7c3aed'; e.currentTarget.style.color = '#7c3aed' }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)' }}
+                  >
+                    <Sparkles size={13} />レポート
+                  </button>
                   <button onClick={() => onDelete(s.id)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4, cursor: 'pointer' }}
                     onMouseEnter={e => e.currentTarget.style.color = 'var(--danger)'}
                     onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
@@ -956,6 +1170,14 @@ function StudentsTab({ students, homework, submissions, onAdd, onDelete, onUpdat
             <Btn onClick={handle}>追加する</Btn>
           </div>
         </Modal>
+      )}
+
+      {reportStudent && (
+        <ParentReportModal
+          student={reportStudent}
+          school={school}
+          onClose={() => setReportStudent(null)}
+        />
       )}
     </div>
   )
@@ -1657,6 +1879,7 @@ function StudentHomeworkCard({ hw, student, photos, scopeNote, submission, onAdd
   const [uploading, setUploading] = useState(false)
   const [savingNote, setSavingNote] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [submitPhase, setSubmitPhase] = useState(null)
   const fileInputRef = useRef(null)
   const color = SUBJECT_COLORS[hw.subject] || '#5a5a5a'
   const isOverdue = new Date(hw.deadline) < new Date()
@@ -1709,7 +1932,29 @@ function StudentHomeworkCard({ hw, student, photos, scopeNote, submission, onAdd
     setSubmitting(true)
     const now = new Date().toISOString()
 
-    // 既存レコードを探してupdate、なければinsert
+    let aiStatus = 'unchecked'
+    let aiFeedback = null
+    let needsResubmit = false
+
+    if (photos.length > 0 && getApiKeys().gemini) {
+      setSubmitPhase('ai')
+      try {
+        const urls = photos.map(p => photoUrl(p.file_path))
+        const result = await analyzeHomeworkPhotos(urls, hw.subject, hw.title)
+        if (result.pass) {
+          aiStatus = 'pass'
+        } else {
+          aiStatus = 'fail'
+          aiFeedback = result.feedback || '自学メモや途中式が不足しています。写真を撮り直して再提出してください。'
+          needsResubmit = true
+        }
+      } catch (e) {
+        console.warn('AI check skipped:', e.message)
+      }
+    }
+
+    setSubmitPhase('saving')
+
     const { data: existing } = await supabase
       .from('submissions')
       .select('id')
@@ -1717,11 +1962,15 @@ function StudentHomeworkCard({ hw, student, photos, scopeNote, submission, onAdd
       .eq('student_id', student.id)
       .maybeSingle()
 
+    const updateData = needsResubmit
+      ? { submitted: false, submitted_at: null, ai_status: aiStatus, ai_feedback: aiFeedback, needs_resubmit: true }
+      : { submitted: true, submitted_at: now, ai_status: aiStatus, ai_feedback: null, needs_resubmit: false }
+
     let result
     if (existing) {
       const { data } = await supabase
         .from('submissions')
-        .update({ submitted: true, submitted_at: now })
+        .update(updateData)
         .eq('id', existing.id)
         .select()
         .single()
@@ -1729,7 +1978,7 @@ function StudentHomeworkCard({ hw, student, photos, scopeNote, submission, onAdd
     } else {
       const { data } = await supabase
         .from('submissions')
-        .insert({ homework_id: hw.id, student_id: student.id, submitted: true, submitted_at: now })
+        .insert({ homework_id: hw.id, student_id: student.id, ...updateData })
         .select()
         .single()
       result = data
@@ -1737,6 +1986,7 @@ function StudentHomeworkCard({ hw, student, photos, scopeNote, submission, onAdd
 
     if (result) onSubmit(result)
     setSubmitting(false)
+    setSubmitPhase(null)
   }
 
   return (
@@ -1820,7 +2070,7 @@ function StudentHomeworkCard({ hw, student, photos, scopeNote, submission, onAdd
 
         {/* 提出ボタン */}
         <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
-          {submission?.submitted ? (
+          {submission?.submitted && !submission?.needs_resubmit ? (
             <div style={{
               display: 'flex', alignItems: 'center', gap: 12,
               padding: '14px 16px', borderRadius: 10,
@@ -1828,7 +2078,9 @@ function StudentHomeworkCard({ hw, student, photos, scopeNote, submission, onAdd
             }}>
               <CheckCircle size={22} color="var(--accent)" />
               <div>
-                <div style={{ fontWeight: 700, color: 'var(--accent)' }}>提出済み</div>
+                <div style={{ fontWeight: 700, color: 'var(--accent)' }}>
+                  提出済み {submission.ai_status === 'pass' && <span style={{ fontSize: '0.75rem', marginLeft: 4 }}>✓ AI確認済</span>}
+                </div>
                 {submission.submitted_at && (
                   <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 2 }}>
                     {fmtDate(submission.submitted_at)}
@@ -1838,14 +2090,33 @@ function StudentHomeworkCard({ hw, student, photos, scopeNote, submission, onAdd
             </div>
           ) : (
             <div>
-              {photos.length === 0 && (
+              {submission?.needs_resubmit && submission?.ai_feedback && (
+                <div style={{
+                  display: 'flex', gap: 10, padding: '12px 14px', borderRadius: 10,
+                  background: '#fff8f0', border: '1px solid #dd6b20', marginBottom: 12,
+                }}>
+                  <AlertCircle size={18} color="#dd6b20" style={{ flexShrink: 0, marginTop: 1 }} />
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#dd6b20', marginBottom: 3 }}>
+                      再提出が必要です
+                    </div>
+                    <div style={{ fontSize: '0.83rem', color: '#7b341e', lineHeight: 1.6 }}>
+                      {submission.ai_feedback}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {photos.length === 0 && !submission?.needs_resubmit && (
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 10 }}>
                   写真を添付してから提出ボタンを押してください
                 </div>
               )}
               <Btn onClick={doSubmit} disabled={submitting}>
                 {submitting ? <Loader size={15} /> : <CheckCircle size={15} />}
-                {submitting ? '提出中...' : '提出する'}
+                {submitting
+                  ? submitPhase === 'ai' ? 'AI確認中...' : '提出中...'
+                  : submission?.needs_resubmit ? '再提出する' : '提出する'
+                }
               </Btn>
             </div>
           )}

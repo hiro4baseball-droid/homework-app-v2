@@ -80,3 +80,15 @@ BEGIN
   END IF;
 END
 $do2$;
+
+-- ════════════════════════════════════════════════════════════
+-- PHASE 3 マイグレーション（AI機能）
+-- ════════════════════════════════════════════════════════════
+
+-- submissions テーブルに AI チェック用カラムを追加
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS ai_status TEXT DEFAULT 'unchecked';
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS ai_feedback TEXT DEFAULT NULL;
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS needs_resubmit BOOLEAN DEFAULT FALSE;
+
+-- students テーブルに PIN カラムを追加（未実行の場合）
+ALTER TABLE students ADD COLUMN IF NOT EXISTS pin TEXT DEFAULT NULL;
