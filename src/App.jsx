@@ -149,6 +149,7 @@ function ParentReportModal({ student, school, onClose }) {
       const text = await generateParentReport(student.name, month, {
         submitted: thisMonthSubs.length, total, tasksDone, homeworkDetails,
       })
+      if (!text) throw new Error('AIからの応答が空でした。しばらく待ってから再試行してください')
       setReport(text)
     } catch (e) {
       setError(e.message)
@@ -1782,6 +1783,7 @@ function StudentHomeworkCard({ hw, student, photos, scopeNote, submission, onAdd
   const [savingNote, setSavingNote] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitPhase, setSubmitPhase] = useState(null)
+  const [aiError, setAiError] = useState(null)
   const fileInputRef = useRef(null)
   const color = SUBJECT_COLORS[hw.subject] || '#5a5a5a'
   const isOverdue = new Date(hw.deadline) < new Date()
@@ -1838,6 +1840,7 @@ function StudentHomeworkCard({ hw, student, photos, scopeNote, submission, onAdd
     let aiFeedback = null
     let needsResubmit = false
 
+    setAiError(null)
     if (photos.length > 0 && getApiKeys().gemini) {
       setSubmitPhase('ai')
       try {
@@ -1851,7 +1854,8 @@ function StudentHomeworkCard({ hw, student, photos, scopeNote, submission, onAdd
           needsResubmit = true
         }
       } catch (e) {
-        console.warn('AI check skipped:', e.message)
+        console.warn('AI check failed:', e.message)
+        setAiError(e.message)
       }
     }
 
@@ -2010,6 +2014,16 @@ function StudentHomeworkCard({ hw, student, photos, scopeNote, submission, onAdd
                       {submission.ai_feedback}
                     </div>
                   </div>
+                </div>
+              )}
+              {aiError && (
+                <div style={{
+                  display: 'flex', gap: 8, padding: '10px 12px', borderRadius: 8,
+                  background: '#fffbeb', border: '1px solid #f6ad55', marginBottom: 10,
+                  fontSize: '0.8rem', color: '#7b4e00',
+                }}>
+                  <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} color="#dd6b20" />
+                  <span>AIチェックをスキップしました: {aiError}</span>
                 </div>
               )}
               {photos.length === 0 && !submission?.needs_resubmit && (
