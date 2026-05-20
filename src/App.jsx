@@ -554,6 +554,7 @@ function SchoolDetail({ school, onBack }) {
         {[
           { key: 'homework', label: '宿題一覧', icon: <ClipboardList size={15} /> },
           { key: 'students', label: '生徒管理', icon: <Users size={15} /> },
+          { key: 'unsubmitted', label: '未提出一覧', icon: <XCircle size={15} /> },
         ].map(({ key, label, icon }) => (
           <button key={key} onClick={() => setTab(key)} style={{
             padding: '7px 16px', border: 'none', borderRadius: '8px',
@@ -575,13 +576,128 @@ function SchoolDetail({ school, onBack }) {
           showAdd={showAddHW} setShowAdd={setShowAddHW}
           onRefresh={fetchAll}
         />
-      ) : (
+      ) : tab === 'students' ? (
         <StudentsTab
           school={school}
           students={students} homework={homework} submissions={submissions}
           onAdd={addStudent} onDelete={deleteStudent} onUpdatePin={updateStudentPin}
           showAdd={showAddSt} setShowAdd={setShowAddSt}
         />
+      ) : (
+        <UnsubmittedTab school={school} homework={homework} students={students} submissions={submissions} />
+      )}
+    </div>
+  )
+}
+
+// ── 未提出一覧タブ ───────────────────────────────
+
+function UnsubmittedTab({ school, homework, students, submissions }) {
+  const now = new Date()
+  const overdueHw = homework.filter(hw => new Date(hw.deadline) < now)
+
+  const rows = overdueHw.map(hw => {
+    const notSubmitted = students.filter(s => {
+      const sub = submissions.find(sb => sb.homework_id === hw.id && sb.student_id === s.id)
+      return !sub?.submitted
+    })
+    return { hw, notSubmitted }
+  }).filter(r => r.notSubmitted.length > 0)
+
+  function handlePrint() {
+    const today = new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })
+    const bodyHtml = rows.map(({ hw, notSubmitted }) => `
+      <div class="section">
+        <div class="hw-title">${hw.title}（${hw.subject}）</div>
+        <div class="hw-deadline">締め切り：${hw.deadline}　未提出：${notSubmitted.length}名</div>
+        <ul>
+          ${notSubmitted.map(s => `<li>${s.name}</li>`).join('')}
+        </ul>
+      </div>
+    `).join('')
+
+    const html = `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>未提出一覧 — ${school.name}</title>
+  <style>
+    body { font-family: 'Helvetica Neue', Arial, sans-serif; padding: 32px; color: #111; }
+    h1 { font-size: 18px; margin-bottom: 4px; }
+    .meta { font-size: 12px; color: #666; margin-bottom: 24px; }
+    .section { margin-bottom: 20px; border-left: 3px solid #2d5a27; padding-left: 12px; }
+    .hw-title { font-size: 14px; font-weight: bold; margin-bottom: 2px; }
+    .hw-deadline { font-size: 11px; color: #666; margin-bottom: 6px; }
+    ul { margin: 0; padding-left: 18px; }
+    li { font-size: 13px; line-height: 1.8; }
+  </style>
+</head>
+<body>
+  <h1>未提出一覧 — ${school.name}</h1>
+  <div class="meta">出力日：${today}</div>
+  ${rows.length === 0 ? '<p>未提出者はいません</p>' : bodyHtml}
+</body>
+</html>`
+
+    const win = window.open('', '_blank')
+    win.document.write(html)
+    win.document.close()
+    win.focus()
+    win.print()
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: '1rem' }}>期限切れ宿題の未提出者</div>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>締め切りを過ぎた宿題で未提出の生徒を表示しています</div>
+        </div>
+        <Btn onClick={handlePrint} disabled={rows.length === 0}>
+          <FileText size={15} />印刷する
+        </Btn>
+      </div>
+
+      {overdueHw.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>期限切れの宿題がありません</div>
+      ) : rows.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
+          <CheckCircle size={36} color="var(--accent)" style={{ marginBottom: 12 }} />
+          <div style={{ fontWeight: 700 }}>全員提出済みです！</div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {rows.map(({ hw, notSubmitted }) => {
+            const color = SUBJECT_COLORS[hw.subject] || '#5a5a5a'
+            return (
+              <div key={hw.id} style={{
+                background: 'var(--surface)', border: '1px solid var(--border)',
+                borderRadius: '14px', padding: '18px 20px',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                  <Badge color={color}>{hw.subject}</Badge>
+                  <Badge color="#c0392b">期限切れ</Badge>
+                  <span style={{ fontWeight: 700, fontSize: '1rem' }}>{hw.title}</span>
+                </div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 12 }}>
+                  締め切り：{hw.deadline}　未提出：{notSubmitted.length}名
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {notSubmitted.map(s => (
+                    <div key={s.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '5px 12px', borderRadius: '999px',
+                      background: '#fff0f0', border: '1px solid #ffcccc',
+                      fontSize: '0.85rem', fontWeight: 600, color: '#c0392b',
+                    }}>
+                      <XCircle size={13} />{s.name}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
       )}
     </div>
   )
