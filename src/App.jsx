@@ -5,7 +5,7 @@ import {
   ChevronDown, ChevronUp, CheckCircle, XCircle,
   School, ArrowLeft, Loader, Camera, X, GraduationCap,
   FileText, Image, Key, CalendarDays, Circle,
-  AlertCircle, RefreshCw, Copy, Sparkles,
+  AlertCircle, RefreshCw, Copy, Sparkles, Pencil,
 } from 'lucide-react'
 import { analyzeHomeworkPhotos, generateParentReport, getApiKeys } from './aiClient'
 
@@ -314,6 +314,8 @@ function SchoolList({ onSelect }) {
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [name, setName] = useState('')
+  const [editingSchool, setEditingSchool] = useState(null)
+  const [editName, setEditName] = useState('')
 
   useEffect(() => { fetchSchools() }, [])
 
@@ -328,6 +330,12 @@ function SchoolList({ onSelect }) {
     if (!name.trim()) return
     await supabase.from('schools').insert({ name: name.trim() })
     setName(''); setShowAdd(false); fetchSchools()
+  }
+
+  async function renameSchool() {
+    if (!editName.trim() || !editingSchool) return
+    await supabase.from('schools').update({ name: editName.trim() }).eq('id', editingSchool.id)
+    setEditingSchool(null); setEditName(''); fetchSchools()
   }
 
   async function deleteSchool(id) {
@@ -370,12 +378,20 @@ function SchoolList({ onSelect }) {
                   }}><School size={20} /></div>
                   <div style={{ fontWeight: 700, fontSize: '1rem' }}>{s.name}</div>
                 </div>
-                <button onClick={e => { e.stopPropagation(); deleteSchool(s.id) }} style={{
-                  background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4, cursor: 'pointer',
-                }}
-                  onMouseEnter={e => e.currentTarget.style.color = 'var(--danger)'}
-                  onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
-                ><Trash2 size={15} /></button>
+                <div style={{ display: 'flex', gap: 2 }}>
+                  <button onClick={e => { e.stopPropagation(); setEditingSchool(s); setEditName(s.name) }} style={{
+                    background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4, cursor: 'pointer', borderRadius: 6,
+                  }}
+                    onMouseEnter={e => e.currentTarget.style.color = 'var(--accent)'}
+                    onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+                  ><Pencil size={14} /></button>
+                  <button onClick={e => { e.stopPropagation(); deleteSchool(s.id) }} style={{
+                    background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4, cursor: 'pointer', borderRadius: 6,
+                  }}
+                    onMouseEnter={e => e.currentTarget.style.color = 'var(--danger)'}
+                    onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+                  ><Trash2 size={15} /></button>
+                </div>
               </div>
               <div style={{ marginTop: 12, fontSize: '0.78rem', color: 'var(--accent)', fontWeight: 600 }}>
                 クリックして管理 →
@@ -394,6 +410,19 @@ function SchoolList({ onSelect }) {
           <div style={{ display: 'flex', gap: 10 }}>
             <Btn outline onClick={() => setShowAdd(false)}>キャンセル</Btn>
             <Btn onClick={addSchool}>追加する</Btn>
+          </div>
+        </Modal>
+      )}
+      {editingSchool && (
+        <Modal title="校舎名を変更" onClose={() => setEditingSchool(null)}>
+          <Field label="新しい校舎名">
+            <input style={inputStyle} value={editName}
+              onChange={e => setEditName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && renameSchool()} autoFocus />
+          </Field>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <Btn outline onClick={() => setEditingSchool(null)}>キャンセル</Btn>
+            <Btn onClick={renameSchool}>変更する</Btn>
           </div>
         </Modal>
       )}
