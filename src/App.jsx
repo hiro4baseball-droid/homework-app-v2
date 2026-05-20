@@ -1310,13 +1310,13 @@ function StudentPINEntry({ student, onSuccess, onBack }) {
 
 // ── 生徒モード ────────────────────────────────────
 
-function StudentMode({ onBack }) {
+function StudentMode({ onTeacher }) {
   const [school, setSchool] = useState(null)
   const [student, setStudent] = useState(null)
   const [pinVerified, setPinVerified] = useState(false)
   const [registering, setRegistering] = useState(false)
 
-  if (!school) return <StudentSchoolSelect onSelect={setSchool} onBack={onBack} />
+  if (!school) return <StudentSchoolSelect onSelect={setSchool} onTeacher={onTeacher} />
 
   if (!student) {
     if (registering) return (
@@ -1356,7 +1356,7 @@ function StudentMode({ onBack }) {
   )
 }
 
-function StudentSchoolSelect({ onSelect, onBack }) {
+function StudentSchoolSelect({ onSelect, onTeacher }) {
   const [schools, setSchools] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -1369,13 +1369,6 @@ function StudentSchoolSelect({ onSelect, onBack }) {
 
   return (
     <div>
-      <button onClick={onBack} style={{
-        display: 'flex', alignItems: 'center', gap: 6,
-        background: 'none', border: 'none', color: 'var(--text-muted)',
-        fontWeight: 600, fontSize: '0.88rem', marginBottom: 24, padding: 0, cursor: 'pointer',
-      }}>
-        <ArrowLeft size={16} /> モード選択に戻る
-      </button>
       <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 20 }}>あなたの校舎を選んでください</h2>
       {loading ? (
         <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}><Loader size={24} /></div>
@@ -1404,6 +1397,15 @@ function StudentSchoolSelect({ onSelect, onBack }) {
           ))}
         </div>
       )}
+      <div style={{ textAlign: 'center', marginTop: 48 }}>
+        <button onClick={onTeacher} style={{
+          background: 'none', border: 'none', color: 'var(--text-muted)',
+          fontSize: '0.78rem', cursor: 'pointer', textDecoration: 'underline',
+          opacity: 0.6,
+        }}>
+          先生の方はこちら
+        </button>
+      </div>
     </div>
   )
 }
@@ -2046,16 +2048,91 @@ function StudentHomeworkCard({ hw, student, photos, scopeNote, submission, onAdd
   )
 }
 
+// ── 先生ログインモーダル ──────────────────────────
+
+function TeacherLoginModal({ onSuccess, onClose }) {
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+
+  function handleSubmit(e) {
+    e.preventDefault()
+    const correct = import.meta.env.VITE_TEACHER_PASSWORD
+    if (!correct) {
+      setError('パスワードが設定されていません。Vercelの環境変数を確認してください。')
+      return
+    }
+    if (password === correct) {
+      onSuccess()
+    } else {
+      setError('パスワードが違います')
+      setPassword('')
+    }
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 1000, padding: 20,
+    }} onClick={onClose}>
+      <div style={{
+        background: 'var(--surface)', borderRadius: '16px', padding: '32px 28px',
+        width: '100%', maxWidth: 360,
+        boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24 }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: '10px',
+            background: '#2d5a2718', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', color: '#2d5a27',
+          }}><Key size={20} /></div>
+          <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>先生ログイン</div>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <Field label="パスワード">
+            <input
+              type="password"
+              style={inputStyle}
+              value={password}
+              onChange={e => { setPassword(e.target.value); setError('') }}
+              placeholder="パスワードを入力"
+              autoFocus
+            />
+          </Field>
+          {error && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#e53e3e', fontSize: '0.83rem', marginBottom: 12 }}>
+              <AlertCircle size={14} />{error}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Btn onClick={onClose} outline>キャンセル</Btn>
+            <button type="submit" style={{
+              flex: 1, padding: '9px 18px', border: 'none', borderRadius: '10px',
+              background: '#2d5a27', color: '#fff', fontWeight: 700,
+              fontSize: '0.88rem', cursor: 'pointer',
+            }}>ログイン</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 // ── メインアプリ ────────────────────────────────
 
 export default function App() {
-  const [mode, setMode] = useState(null)
+  const [mode, setMode] = useState('student')
   const [selectedSchool, setSelectedSchool] = useState(null)
-
-  if (mode === null) return <ModeSelect onSelect={setMode} />
+  const [teacherLoginOpen, setTeacherLoginOpen] = useState(false)
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+      {teacherLoginOpen && (
+        <TeacherLoginModal
+          onSuccess={() => { setTeacherLoginOpen(false); setMode('teacher') }}
+          onClose={() => setTeacherLoginOpen(false)}
+        />
+      )}
       <header style={{
         background: 'var(--surface)', borderBottom: '1px solid var(--border)',
         padding: '0 24px', position: 'sticky', top: 0, zIndex: 100,
@@ -2063,9 +2140,9 @@ export default function App() {
         <div style={{ maxWidth: 960, margin: '0 auto', display: 'flex', alignItems: 'center', height: 56, gap: 10 }}>
           <BookOpen size={20} color="var(--accent)" />
           <span style={{ fontWeight: 700, fontSize: '1rem' }}>宿題提出管理</span>
-          <Badge color={mode === 'teacher' ? '#2d5a27' : '#7c3aed'}>
-            {mode === 'teacher' ? '先生' : '生徒'}
-          </Badge>
+          {mode === 'teacher' && (
+            <Badge color="#2d5a27">先生</Badge>
+          )}
           {mode === 'teacher' && selectedSchool && (
             <>
               <span style={{ color: 'var(--text-muted)' }}>/</span>
@@ -2073,13 +2150,15 @@ export default function App() {
             </>
           )}
           <div style={{ flex: 1 }} />
-          <button onClick={() => { setMode(null); setSelectedSchool(null) }} style={{
-            background: 'none', border: '1px solid var(--border)', borderRadius: 8,
-            padding: '5px 12px', fontSize: '0.78rem', color: 'var(--text-muted)',
-            fontWeight: 600, cursor: 'pointer',
-          }}>
-            モード切替
-          </button>
+          {mode === 'teacher' && (
+            <button onClick={() => { setMode('student'); setSelectedSchool(null) }} style={{
+              background: 'none', border: '1px solid var(--border)', borderRadius: 8,
+              padding: '5px 12px', fontSize: '0.78rem', color: 'var(--text-muted)',
+              fontWeight: 600, cursor: 'pointer',
+            }}>
+              生徒画面へ
+            </button>
+          )}
         </div>
       </header>
 
@@ -2091,7 +2170,7 @@ export default function App() {
             <SchoolList onSelect={setSelectedSchool} />
           )
         ) : (
-          <StudentMode onBack={() => setMode(null)} />
+          <StudentMode onTeacher={() => setTeacherLoginOpen(true)} />
         )}
       </main>
     </div>
